@@ -7,16 +7,6 @@ source("sim.bdh.age.help.2.R")
 
 # ── Functions ──────────────────────────────────────────────────────────────────
 
-strip_hybridisation <- function(result) {
-  phy_no_hyb <- result$phy
-  phy_no_hyb$reticulation <- matrix(nrow = 0, ncol = 2,
-                                    dimnames = list(NULL, c("from", "to")))
-  phy_no_hyb$inheritance  <- c()
-  class(phy_no_hyb) <- "phylo"
-  result$phy <- phy_no_hyb
-  result
-}
-
 run_simulation <- function(age, lambda, mu, nu, hybprops,
                            hyb.inher.fxn, hyb.rate.fxn = NULL,
                            frac = 1, mrca = FALSE, complete = TRUE,
@@ -40,10 +30,7 @@ run_simulation <- function(age, lambda, mu, nu, hybprops,
     trait.model   = trait.model
   )
 
-  list(
-    with_hyb    = with_hyb,
-    without_hyb = strip_hybridisation(with_hyb)
-  )
+  with_hyb
 }
 
 print_summary <- function(result, age) {
@@ -182,7 +169,7 @@ plot_network <- function(result, file = "Rplot.pdf") {
 }
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-AGE      <- 3
+AGE      <- 4
 LAMBDA   <- 0.5
 MU       <- 0.1
 NU       <- 0.05
@@ -208,15 +195,8 @@ sim <- run_simulation(
 OUT_DIR <- "../../Outputs/phylo_outputs"
 if (!dir.exists(OUT_DIR)) dir.create(OUT_DIR, recursive = TRUE)
 
-cat("── With hybridisation ──────────────────────────────\n")
-print_summary(sim$with_hyb, AGE)
-print_hybridisation_edges(sim$with_hyb)
-write_distance_matrix(sim$with_hyb, file.path(OUT_DIR, "distance_matrix.txt"))
-write_distance_matrix(sim$with_hyb, file.path(OUT_DIR, "distance_matrix_all_nodes.txt"), all_nodes = TRUE)
-plot_network(sim$with_hyb, file.path(OUT_DIR, "Rplot.pdf"))
-
-cat("\n── Without hybridisation ───────────────────────────\n")
-print_summary(sim$without_hyb, AGE)
-write_distance_matrix(sim$without_hyb, file.path(OUT_DIR, "distance_matrix_no_hyb.txt"))
-write_distance_matrix(sim$without_hyb, file.path(OUT_DIR, "distance_matrix_all_nodes_no_hyb.txt"), all_nodes = TRUE)
-plot_network(sim$without_hyb, file.path(OUT_DIR, "Rplot_no_hyb.pdf"))
+print_summary(sim, AGE)
+print_hybridisation_edges(sim)
+write_distance_matrix(sim, file.path(OUT_DIR, "distance_matrix.txt"))
+write_distance_matrix(sim, file.path(OUT_DIR, "distance_matrix_all_nodes.txt"), all_nodes = TRUE)
+plot_network(sim, file.path(OUT_DIR, "Rplot.pdf"))

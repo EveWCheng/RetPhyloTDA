@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import numpy as np
 from network_lab_tda.data_prep.Data_Prep import Data_Prep
 from network_lab_tda.data_prep.Populate_Edge import Populate_Edge
@@ -13,14 +14,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def main(headers=True, header_fn="header.txt", populated_header_fn="populated_headers.txt", which_nodes="all_nodes"):
     if which_nodes == "all_nodes":
         input_txt = "distance_matrix_all_nodes.txt"
-    elif which_nodes == "no_hyb":
-        input_txt = "distance_matrix_no_hyb.txt"
     else:
         input_txt = "distance_matrix.txt"
+
     input_path = os.path.join(HERE, os.pardir, "Outputs", "phylo_outputs", input_txt)
     output_path = os.path.join(HERE, os.pardir, "Outputs","proc_phylo_outputs")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
+
+    cycle_output_path = os.path.join(HERE, os.pardir, "Outputs", "cycle_outputs")
+    vis_suffix = "all_nodes" if which_nodes == "all_nodes" else "leaf_nodes"
+    vis_output_path = os.path.join(cycle_output_path, vis_suffix)
+    if os.path.exists(vis_output_path):
+        shutil.rmtree(vis_output_path)
 
     dp = Data_Prep(filepath=input_path, log_path=output_path, headers=headers, header_fn=header_fn)
     pe = Populate_Edge(G=dp.G, log_path=output_path, headers=headers, header_fn=header_fn, populated_header_fn=populated_header_fn)
@@ -32,7 +38,6 @@ def main(headers=True, header_fn="header.txt", populated_header_fn="populated_he
     print(f"Populated node count:    {pe.max_index}")
     print(f"Populated distance matrix shape: {dist_matrix.shape}")
 
-    cycle_output_path = os.path.join(HERE, os.pardir, "Outputs", "cycle_outputs")
     if not os.path.exists(cycle_output_path):
         os.makedirs(cycle_output_path)
     hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=os.path.join(cycle_output_path,"rip.json"))
@@ -41,10 +46,15 @@ def main(headers=True, header_fn="header.txt", populated_header_fn="populated_he
     hc.run_harmonics()
     hc.save_log()
 
+    os.makedirs(vis_output_path)
+    plotter_kwargs = {}
+    if which_nodes != "all_nodes":
+        plotter_kwargs["thresholds"] = None
     plotter = tda_visual_from_jason(
         jason_path=hc.log_path,
         index_to_name=pe.index_to_name,
-        log_path=cycle_output_path,
+        log_path=vis_output_path,
+        **plotter_kwargs
     )
     plotter.cycle_plot()
 
@@ -70,4 +80,5 @@ def main(headers=True, header_fn="header.txt", populated_header_fn="populated_he
             print(f"    edge=({label_u}, {label_v})  weight={edge['weight']:.6g}")
 
 
-main(which_nodes = "no_hyb")
+for which_nodes in ["all_nodes", ""]:
+    main(which_nodes=which_nodes)

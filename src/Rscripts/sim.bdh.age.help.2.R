@@ -1,3 +1,29 @@
+library(lifecycle)
+
+sim.bdh.age <-function(age,numbsim,
+                      lambda,mu,
+                      nu, hybprops,
+                      hyb.inher.fxn,
+                      frac=1,twolineages=FALSE,complete=TRUE,stochsampling=FALSE,
+                      hyb.rate.fxn=NULL,
+                      trait.model=NULL,
+                      mrca=deprecated()){
+  if (is_present(mrca)) {
+    lifecycle::deprecate_warn("1.1.0", "sim.bdh.age(mrca)", "sim.bdh.age(twolineages)")
+    twolineages <- mrca
+  }
+    out<-lapply(1:numbsim,sim.bdh.age.help2,
+                age=age,
+                lambda=lambda,mu=mu,
+                nu=nu, hybprops=hybprops,
+                hyb.rate.fxn=hyb.rate.fxn,
+                hyb.inher.fxn=hyb.inher.fxn,
+                frac=frac,mrca=twolineages,
+                complete=complete, stochsampling=stochsampling,
+                trait.model=trait.model)
+    class(out)<-c('list','multiPhylo')
+    out
+}
 sim.bdh.age.help2 <-function(dummy,age,lambda,mu,
                            nu, hybprops,hyb.rate.fxn,
                            hyb.inher.fxn,
@@ -96,7 +122,6 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
     genetic_dists2 <- genetic_dists
     node <- NULL
     tip <- "-2"
-    name_table <- matrix(NA,nrow=1,ncol=2)  # initialise so extinct-tree case can return cleanly
     while (stop == 0 ){
       if (nleaves == 0){
         #phy2 = 0
@@ -309,7 +334,7 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                   genetic_dists2[[maxspecies4]]<-hybrid_species_row
                   genetic_dists2[[maxspecies4]][[maxspecies4]]<-0.0
                   genetic_dists2[[maxspecies4]][[species3]]<-0.0
-                  genetic_dists2[[species34]]<-hybrid_species_row
+                  genetic_dists2[[species3]]<-hybrid_species_row
                   genetic_dists2[[species3]][[maxspecies4]]<-0.0
                   genetic_dists2[[species3]][[species3]]<-0.0
                   ##update the species1 lineage with a new name essentially
@@ -468,6 +493,21 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
         if(m!=0){
           time<- time+timestep
           age<-time
+          if (!is.null(node)) {
+          for(i in node){
+              for (j in tip) {
+                genetic_dists2[[i]][[j]]<- genetic_dists2[[i]][[j]]+timestep
+                genetic_dists2[[j]][[i]]<- genetic_dists2[[j]][[i]]+timestep
+              }
+          }
+          }
+          for(i in tip){
+              for (j in tip) {
+                  if (i!=j) {
+                genetic_dists2[[i]][[j]]<- genetic_dists2[[i]][[j]]+2*timestep
+                }
+              }
+          }
         }else{
           timestep<-age-time ##we need the length of time between age and the previous event for updating genetic distances
           time = age
@@ -581,5 +621,16 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
         phy$time_in_n<-time_in_n
       }
     }
+    if (!is.null(phy$edge)) {
+    phy$node.label=name_table[match(phy$edge[1,1]-1+c(1:phy$Nnode),name_table[,2]),1]
+    phy$tip.label=name_table[match(1:(phy$edge[1,1]-1),name_table[,2]),1]
+    }
     list(phy=phy,name_table=name_table,distance=genetic_dists2)
   }
+
+
+#sim <- sim.bdh.age(age=2,numbsim=1,lambda=1,mu=0.2,nu=0.25,hybprops=c(0,0,1),hyb.inher.fxn=inheritance,fxn,complete=F)
+#phy <- sim[[1]]$phy
+#plot(phy,show.node.label=T)
+#edgelabels(phy$edge.length,frame = "none", adj = c(0.5, -0.5))
+

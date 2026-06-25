@@ -282,8 +282,8 @@ function highlightFilter(filter) {
                   
 
                   // parsing and collecting nodes and edges from the python
-                  nodes = new vis.DataSet([{"color": "#97c2fc", "font": {"size": 40}, "id": 0, "label": "-2", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 1, "label": "-3", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 2, "label": "-5", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 3, "label": "-6", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 4, "label": "-7", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 5, "label": "-8", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 6, "label": "-9", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 7, "label": "sp1", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 8, "label": "-11", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 9, "label": "sp2", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 10, "label": "-14", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 11, "label": "sp3", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 12, "label": "-15", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 13, "label": "sp4", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 14, "label": "-17", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 15, "label": "-20", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 16, "label": "sp5", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 17, "label": "sp6", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 18, "label": "sp7", "shape": "dot", "size": 5}]);
-                  edges = new vis.DataSet([{"color": "black", "from": 10, "to": 14}, {"color": "black", "from": 15, "to": 17}, {"color": "black", "from": 15, "to": 18}, {"color": "black", "from": 17, "to": 18}, {"color": "black", "from": 1, "to": 3}, {"color": "black", "from": 4, "to": 10}, {"color": "black", "from": 4, "to": 14}, {"color": "black", "from": 12, "to": 16}, {"color": "black", "from": 3, "to": 5}, {"color": "black", "from": 6, "to": 12}, {"color": "black", "from": 14, "to": 15}, {"color": "black", "from": 0, "to": 1}, {"color": "black", "from": 1, "to": 2}, {"color": "black", "from": 10, "to": 15}, {"color": "black", "from": 14, "to": 17}, {"color": "black", "from": 14, "to": 18}, {"color": "black", "from": 10, "to": 17}, {"color": "black", "from": 10, "to": 18}, {"color": "black", "from": 2, "to": 6}, {"color": "black", "from": 1, "to": 5}, {"color": "black", "from": 0, "to": 3}, {"color": "black", "from": 2, "to": 3}, {"color": "black", "from": 5, "to": 8}, {"color": "black", "from": 4, "to": 15}, {"color": "black", "from": 6, "to": 13}, {"color": "black", "from": 6, "to": 16}, {"color": "black", "from": 8, "to": 11}, {"color": "black", "from": 4, "to": 17}, {"color": "black", "from": 4, "to": 18}, {"color": "black", "from": 3, "to": 4}, {"color": "black", "from": 3, "to": 8}, {"color": "black", "from": 0, "to": 2}, {"color": "black", "from": 2, "to": 12}, {"color": "black", "from": 1, "to": 4}, {"color": "black", "from": 1, "to": 8}, {"color": "black", "from": 0, "to": 5}, {"color": "black", "from": 1, "to": 6}, {"color": "black", "from": 2, "to": 5}, {"color": "black", "from": 3, "to": 10}, {"color": "black", "from": 3, "to": 14}, {"color": "black", "from": 4, "to": 8}, {"color": "black", "from": 12, "to": 13}, {"color": "black", "from": 3, "to": 6}, {"color": "black", "from": 5, "to": 9}, {"color": "black", "from": 4, "to": 5}, {"color": "black", "from": 1, "to": 10}, {"color": "black", "from": 1, "to": 14}, {"color": "black", "from": 2, "to": 7}, {"color": "black", "from": 2, "to": 13}, {"color": "black", "from": 2, "to": 16}, {"color": "black", "from": 8, "to": 10}, {"color": "black", "from": 1, "to": 12}, {"color": "black", "from": 0, "to": 4}, {"color": "black", "from": 0, "to": 8}, {"color": "black", "from": 2, "to": 4}, {"color": "black", "from": 2, "to": 8}, {"color": "black", "from": 8, "to": 14}, {"color": "black", "from": 5, "to": 11}, {"color": "black", "from": 0, "to": 6}, {"color": "black", "from": 5, "to": 10}, {"color": "black", "from": 13, "to": 16}, {"color": "black", "from": 5, "to": 14}, {"color": "black", "from": 3, "to": 15}, {"color": "black", "from": 5, "to": 6}, {"color": "black", "from": 3, "to": 12}, {"color": "black", "from": 3, "to": 17}, {"color": "black", "from": 3, "to": 18}, {"color": "black", "from": 3, "to": 9}, {"color": "black", "from": 3, "to": 11}, {"color": "black", "from": 0, "to": 10}, {"color": "black", "from": 2, "to": 10}, {"color": "black", "from": 1, "to": 15}, {"color": "black", "from": 0, "to": 14}, {"color": "black", "from": 2, "to": 14}, {"color": "black", "from": 1, "to": 17}, {"color": "black", "from": 1, "to": 18}, {"color": "black", "from": 1, "to": 7}, {"color": "black", "from": 1, "to": 9}, {"color": "black", "from": 1, "to": 11}, {"color": "black", "from": 1, "to": 13}, {"color": "black", "from": 1, "to": 16}, {"color": "black", "from": 0, "to": 12}, {"color": "black", "from": 6, "to": 7}, {"color": "black", "from": 8, "to": 15}, {"color": "black", "from": 8, "to": 9}, {"color": "black", "from": 3, "to": 7}, {"color": "black", "from": 3, "to": 13}, {"color": "black", "from": 3, "to": 16}, {"color": "black", "from": 8, "to": 17}, {"color": "black", "from": 8, "to": 18}, {"color": "black", "from": 4, "to": 11}, {"color": "black", "from": 5, "to": 15}, {"color": "black", "from": 5, "to": 12}, {"color": "black", "from": 4, "to": 6}, {"color": "black", "from": 6, "to": 8}, {"color": "black", "from": 5, "to": 17}, {"color": "black", "from": 5, "to": 18}, {"color": "black", "from": 0, "to": 15}, {"color": "black", "from": 2, "to": 15}, {"color": "black", "from": 10, "to": 11}, {"color": "black", "from": 0, "to": 16}, {"color": "black", "from": 0, "to": 7}, {"color": "black", "from": 0, "to": 9}, {"color": "black", "from": 0, "to": 11}, {"color": "black", "from": 0, "to": 13}, {"color": "black", "from": 0, "to": 17}, {"color": "black", "from": 0, "to": 18}, {"color": "black", "from": 2, "to": 9}, {"color": "black", "from": 2, "to": 11}, {"color": "black", "from": 2, "to": 17}, {"color": "black", "from": 2, "to": 18}, {"color": "black", "from": 11, "to": 14}, {"color": "black", "from": 6, "to": 10}, {"color": "black", "from": 7, "to": 12}, {"color": "black", "from": 6, "to": 14}, {"color": "black", "from": 5, "to": 16}, {"color": "black", "from": 5, "to": 7}, {"color": "black", "from": 5, "to": 13}, {"color": "black", "from": 4, "to": 12}, {"color": "black", "from": 8, "to": 12}, {"color": "black", "from": 4, "to": 9}, {"color": "black", "from": 7, "to": 13}, {"color": "black", "from": 7, "to": 16}, {"color": "black", "from": 10, "to": 12}, {"color": "black", "from": 11, "to": 15}, {"color": "black", "from": 9, "to": 11}, {"color": "black", "from": 9, "to": 10}, {"color": "black", "from": 12, "to": 14}, {"color": "black", "from": 11, "to": 17}, {"color": "black", "from": 11, "to": 18}, {"color": "black", "from": 6, "to": 15}, {"color": "black", "from": 9, "to": 14}, {"color": "black", "from": 4, "to": 7}, {"color": "black", "from": 7, "to": 8}, {"color": "black", "from": 4, "to": 13}, {"color": "black", "from": 8, "to": 13}, {"color": "black", "from": 4, "to": 16}, {"color": "black", "from": 8, "to": 16}, {"color": "black", "from": 6, "to": 17}, {"color": "black", "from": 6, "to": 18}, {"color": "black", "from": 6, "to": 9}, {"color": "black", "from": 6, "to": 11}, {"color": "black", "from": 10, "to": 13}, {"color": "black", "from": 10, "to": 16}, {"color": "black", "from": 7, "to": 10}, {"color": "black", "from": 13, "to": 14}, {"color": "black", "from": 14, "to": 16}, {"color": "black", "from": 7, "to": 14}, {"color": "black", "from": 12, "to": 15}, {"color": "black", "from": 9, "to": 15}, {"color": "black", "from": 12, "to": 17}, {"color": "black", "from": 12, "to": 18}, {"color": "black", "from": 9, "to": 12}, {"color": "black", "from": 11, "to": 12}, {"color": "black", "from": 9, "to": 17}, {"color": "black", "from": 9, "to": 18}, {"color": "black", "from": 15, "to": 16}, {"color": "black", "from": 7, "to": 15}, {"color": "black", "from": 13, "to": 15}, {"color": "black", "from": 13, "to": 17}, {"color": "black", "from": 16, "to": 17}, {"color": "black", "from": 13, "to": 18}, {"color": "black", "from": 16, "to": 18}, {"color": "black", "from": 9, "to": 16}, {"color": "black", "from": 11, "to": 16}, {"color": "black", "from": 7, "to": 17}, {"color": "black", "from": 7, "to": 18}, {"color": "black", "from": 7, "to": 9}, {"color": "black", "from": 7, "to": 11}, {"color": "black", "from": 9, "to": 13}, {"color": "black", "from": 11, "to": 13}]);
+                  nodes = new vis.DataSet([{"color": "#97c2fc", "font": {"size": 40}, "id": 0, "label": "sp1", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 1, "label": "sp2", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 2, "label": "sp3", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 3, "label": "sp4", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 4, "label": "sp5", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 5, "label": "sp6", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 6, "label": "sp7", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 7, "label": "sp8", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 8, "label": "sp9", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 9, "label": "sp10", "shape": "dot", "size": 5}, {"color": "#97c2fc", "font": {"size": 40}, "id": 10, "label": "sp11", "shape": "dot", "size": 5}]);
+                  edges = new vis.DataSet([{"color": "black", "from": 7, "to": 8}, {"color": "black", "from": 4, "to": 5}, {"color": "black", "from": 2, "to": 3}, {"color": "black", "from": 6, "to": 7}, {"color": "black", "from": 6, "to": 8}, {"color": "black", "from": 1, "to": 4}, {"color": "black", "from": 1, "to": 5}, {"color": "black", "from": 2, "to": 9}, {"color": "black", "from": 3, "to": 9}, {"color": "black", "from": 2, "to": 10}, {"color": "black", "from": 3, "to": 10}, {"color": "black", "from": 4, "to": 7}, {"color": "black", "from": 5, "to": 7}, {"color": "black", "from": 4, "to": 8}, {"color": "black", "from": 5, "to": 8}, {"color": "black", "from": 1, "to": 7}, {"color": "black", "from": 1, "to": 8}, {"color": "black", "from": 4, "to": 6}, {"color": "black", "from": 5, "to": 6}, {"color": "black", "from": 1, "to": 6}, {"color": "black", "from": 0, "to": 2}, {"color": "black", "from": 0, "to": 3}, {"color": "black", "from": 0, "to": 9}, {"color": "black", "from": 0, "to": 10}, {"color": "black", "from": 0, "to": 1}, {"color": "black", "from": 1, "to": 2}, {"color": "black", "from": 1, "to": 3}, {"color": "black", "from": 0, "to": 4}, {"color": "black", "from": 2, "to": 4}, {"color": "black", "from": 3, "to": 4}, {"color": "black", "from": 0, "to": 5}, {"color": "black", "from": 2, "to": 5}, {"color": "black", "from": 3, "to": 5}, {"color": "black", "from": 0, "to": 6}, {"color": "black", "from": 2, "to": 6}, {"color": "black", "from": 3, "to": 6}, {"color": "black", "from": 0, "to": 7}, {"color": "black", "from": 2, "to": 7}, {"color": "black", "from": 3, "to": 7}, {"color": "black", "from": 0, "to": 8}, {"color": "black", "from": 2, "to": 8}, {"color": "black", "from": 3, "to": 8}, {"color": "black", "from": 1, "to": 9}, {"color": "black", "from": 4, "to": 9}, {"color": "black", "from": 5, "to": 9}, {"color": "black", "from": 6, "to": 9}, {"color": "black", "from": 7, "to": 9}, {"color": "black", "from": 8, "to": 9}, {"color": "black", "from": 1, "to": 10}, {"color": "black", "from": 4, "to": 10}, {"color": "black", "from": 5, "to": 10}, {"color": "black", "from": 6, "to": 10}, {"color": "black", "from": 7, "to": 10}, {"color": "black", "from": 8, "to": 10}, {"color": "black", "from": 9, "to": 10}]);
 
                   nodeColors = {};
                   allNodes = nodes.get({ returnType: "Object" });
@@ -317,5 +317,80 @@ function highlightFilter(filter) {
               }
               drawGraph();
         </script>
-    </body>
+    <script>
+var TRI_FILL   = "rgba(100, 160, 255, 0.22)";
+var TRI_STROKE = "rgba(100, 160, 255, 0.55)";
+var TET_FILL   = "rgba(255, 140, 80,  0.18)";
+var TET_STROKE = "rgba(255, 140, 80,  0.50)";
+
+var triangles = [[6, 7, 8], [1, 4, 5], [2, 3, 9], [2, 3, 10], [4, 5, 7], [4, 5, 8], [4, 7, 8], [5, 7, 8], [1, 4, 7], [1, 5, 7], [1, 4, 8], [1, 5, 8], [1, 7, 8], [4, 5, 6], [4, 6, 7], [5, 6, 7], [4, 6, 8], [5, 6, 8], [1, 4, 6], [1, 5, 6], [1, 6, 7], [1, 6, 8], [0, 2, 3], [0, 2, 9], [0, 3, 9], [0, 2, 10], [0, 3, 10], [0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 1, 4], [0, 2, 4], [1, 2, 4], [0, 3, 4], [1, 3, 4], [2, 3, 4], [0, 1, 5], [0, 2, 5], [1, 2, 5], [0, 3, 5], [1, 3, 5], [2, 3, 5], [0, 4, 5], [2, 4, 5], [3, 4, 5], [0, 1, 6], [0, 2, 6], [1, 2, 6], [0, 3, 6], [1, 3, 6], [2, 3, 6], [0, 4, 6], [2, 4, 6], [3, 4, 6], [0, 5, 6], [2, 5, 6], [3, 5, 6], [0, 1, 7], [0, 2, 7], [1, 2, 7], [0, 3, 7], [1, 3, 7], [2, 3, 7], [0, 4, 7], [2, 4, 7], [3, 4, 7], [0, 5, 7], [2, 5, 7], [3, 5, 7], [0, 6, 7], [2, 6, 7], [3, 6, 7], [0, 1, 8], [0, 2, 8], [1, 2, 8], [0, 3, 8], [1, 3, 8], [2, 3, 8], [0, 4, 8], [2, 4, 8], [3, 4, 8], [0, 5, 8], [2, 5, 8], [3, 5, 8], [0, 6, 8], [2, 6, 8], [3, 6, 8], [0, 7, 8], [2, 7, 8], [3, 7, 8], [0, 1, 9], [1, 2, 9], [1, 3, 9], [0, 4, 9], [1, 4, 9], [2, 4, 9], [3, 4, 9], [0, 5, 9], [1, 5, 9], [2, 5, 9], [3, 5, 9], [4, 5, 9], [0, 6, 9], [1, 6, 9], [2, 6, 9], [3, 6, 9], [4, 6, 9], [5, 6, 9], [0, 7, 9], [1, 7, 9], [2, 7, 9], [3, 7, 9], [4, 7, 9], [5, 7, 9], [6, 7, 9], [0, 8, 9], [1, 8, 9], [2, 8, 9], [3, 8, 9], [4, 8, 9], [5, 8, 9], [6, 8, 9], [7, 8, 9], [0, 1, 10], [1, 2, 10], [1, 3, 10], [0, 4, 10], [1, 4, 10], [2, 4, 10], [3, 4, 10], [0, 5, 10], [1, 5, 10], [2, 5, 10], [3, 5, 10], [4, 5, 10], [0, 6, 10], [1, 6, 10], [2, 6, 10], [3, 6, 10], [4, 6, 10], [5, 6, 10], [0, 7, 10], [1, 7, 10], [2, 7, 10], [3, 7, 10], [4, 7, 10], [5, 7, 10], [6, 7, 10], [0, 8, 10], [1, 8, 10], [2, 8, 10], [3, 8, 10], [4, 8, 10], [5, 8, 10], [6, 8, 10], [7, 8, 10], [0, 9, 10], [1, 9, 10], [2, 9, 10], [3, 9, 10], [4, 9, 10], [5, 9, 10], [6, 9, 10], [7, 9, 10], [8, 9, 10]];
+var tetras    = [];
+
+function attachOverlay() {
+  if (typeof network === "undefined") { setTimeout(attachOverlay, 100); return; }
+
+  var container = document.getElementById("mynetwork");
+  var visCanvas = container.querySelector("canvas");
+  if (!visCanvas) { setTimeout(attachOverlay, 100); return; }
+
+  var oc = document.createElement("canvas");
+  oc.style.position      = "absolute";
+  oc.style.top           = "0"; oc.style.left = "0";
+  oc.style.pointerEvents = "none";
+  oc.style.zIndex        = "5";
+  container.style.position = "relative";
+  container.appendChild(oc);
+
+  var ctx = oc.getContext("2d");
+
+  function syncSize() {
+    oc.width  = visCanvas.width;
+    oc.height = visCanvas.height;
+  }
+  syncSize();
+
+  function getNodePos(id) {
+    var pos = network.getPositions([id]);
+    if (!pos[id]) return null;
+    return network.canvasToDOM({ x: pos[id].x, y: pos[id].y });
+  }
+
+  function drawPolygon(ids, fill, stroke) {
+    var pts = ids.map(getNodePos);
+    if (pts.some(p => p === null)) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.fillStyle   = fill;   ctx.fill();
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1.2; ctx.stroke();
+  }
+
+  function tetFaces(ids) {
+    return [
+      [ids[0], ids[1], ids[2]],
+      [ids[0], ids[1], ids[3]],
+      [ids[0], ids[2], ids[3]],
+      [ids[1], ids[2], ids[3]],
+    ];
+  }
+
+  function redraw() {
+    syncSize();
+    ctx.clearRect(0, 0, oc.width, oc.height);
+    tetras.forEach(function(ids) {
+      tetFaces(ids).forEach(function(face) { drawPolygon(face, TET_FILL, TET_STROKE); });
+    });
+    triangles.forEach(function(ids) { drawPolygon(ids, TRI_FILL, TRI_STROKE); });
+  }
+
+  network.on("afterDrawing", function() { redraw(); });
+  window.addEventListener("resize", function() { syncSize(); redraw(); });
+  redraw();
+}
+
+setTimeout(attachOverlay, 50);
+
+</script>
+</body>
 </html>
