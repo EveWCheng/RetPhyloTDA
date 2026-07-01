@@ -11,3 +11,6 @@ wheels/
 
 # Outputs
 Outputs/
+
+# Local libraries
+src/lib/
