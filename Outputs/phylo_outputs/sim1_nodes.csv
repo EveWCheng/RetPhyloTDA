@@ -1,0 +1,16 @@
+id,label,type
+1,-1,internal
+2,-2,internal
+3,-3,internal
+4,-4,internal
+5,-5,internal
+6,-6,internal
+7,-7,internal
+8,sp8,leaf
+9,-9,internal
+10,-10,internal
+11,ext11,extinct
+12,hyb12,hyb_source
+13,ext13,extinct
+14,sp14,leaf
+15,sp15,leaf

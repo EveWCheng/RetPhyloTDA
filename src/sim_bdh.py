@@ -52,6 +52,7 @@ class PhyloNetwork:
         return sum(1 for n in self.G if not self.G.nodes[n]['is_leaf'])
 
 
+
 class SimState:
     """Mutable state for one BDH simulation run."""
 
@@ -251,7 +252,7 @@ def _sim_one(age, lambda_, mu, nu, hybprops, hyb_inher_fxn, mrca, hyb_rate_fxn) 
             state.time = age
             break
 
-        sp1, sp2 = _sample_lineages(state.leaves)
+        sp1 = _sample_one(state.leaves)
         rand = np.random.uniform()
 
         if rand < spec_rate / total_rate:
@@ -259,20 +260,19 @@ def _sim_one(age, lambda_, mu, nu, hybprops, hyb_inher_fxn, mrca, hyb_rate_fxn) 
         elif rand < (spec_rate + ext_rate) / total_rate:
             state.extinction(sp1, is_null_trait=True)
         else:
-            _try_hybridization(state, sp1, sp2, hybprops, hyb_inher_fxn, hyb_rate_fxn)
+            _try_hybridization(state, sp1, hybprops, hyb_inher_fxn, hyb_rate_fxn)
 
     _finalize_pendant_edges(state)
     return _build_output(state)
 
 
-def _sample_lineages(leaves: set[int]) -> tuple[int, int]:
-    """Sample 2 random active leaves."""
-    sp1, sp2 = np.random.choice(list(leaves), size=2, replace=False)
-    return int(sp1), int(sp2)
+def _sample_one(leaves: set[int]) -> int:
+    return int(np.random.choice(list(leaves)))
 
 
-def _try_hybridization(state: SimState, sp1, sp2,
+def _try_hybridization(state: SimState, sp1,
                        hybprops, hyb_inher_fxn, hyb_rate_fxn):
+    sp2 = _sample_one(state.leaves - {sp1})
     inher = hyb_inher_fxn()
     d12 = None
 
@@ -299,8 +299,21 @@ def _finalize_pendant_edges(state: SimState):
         state._seal_edge(parent, leaf)
 
 
+def _assign_labels(G: nx.DiGraph):
+    for n, attrs in G.nodes(data=True):
+        if attrs.get('extinct'):
+            label = f"ext{n}"
+        elif attrs.get('hyb_source'):
+            label = f"hyb{n}"
+        elif attrs['is_leaf']:
+            label = f"sp{n}"
+        else:
+            label = f"-{n}"
+        G.nodes[n]['label'] = label
+
+
 def _build_output(state: SimState) -> dict:
-    """Package the final graph into a PhyloNetwork and compute the distance matrix."""
+    _assign_labels(state.G)
     phy = PhyloNetwork(
         G=state.G,
         inheritance=np.array(state.inheritance),

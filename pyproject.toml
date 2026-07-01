@@ -5,7 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "network-lab-tda"]
+    "network-lab-tda",
+]
 
 [tool.uv.sources]
 network-lab-tda = { path = "../network-lab-tda", editable = true}
