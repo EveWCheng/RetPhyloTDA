@@ -7,7 +7,7 @@ sim.bdh.age <-function(age,numbsim,
                       frac=1,twolineages=FALSE,complete=TRUE,stochsampling=FALSE,
                       hyb.rate.fxn=NULL,
                       trait.model=NULL,
-                      mrca=deprecated()){
+                      mrca=deprecated(),Ngene){ #Ngene how many genes to simulation, if Ngene=0, all possible topologies will be listed
   if (is_present(mrca)) {
     lifecycle::deprecate_warn("1.1.0", "sim.bdh.age(mrca)", "sim.bdh.age(twolineages)")
     twolineages <- mrca
@@ -20,7 +20,7 @@ sim.bdh.age <-function(age,numbsim,
                 hyb.inher.fxn=hyb.inher.fxn,
                 frac=frac,mrca=twolineages,
                 complete=complete, stochsampling=stochsampling,
-                trait.model=trait.model)
+                trait.model=trait.model,Ngene=Ngene)
     class(out)<-c('list','multiPhylo')
     out
 }
@@ -28,7 +28,7 @@ sim.bdh.age.help2 <-function(dummy,age,lambda,mu,
                            nu, hybprops,hyb.rate.fxn,
                            hyb.inher.fxn,
                            frac=1,mrca=FALSE,complete=TRUE,stochsampling=FALSE,
-                           trait.model){
+                           trait.model,Ngene){
 	out<-sim.bdh.age.loop2(age=age,
 	                      lambda=lambda,mu=mu,
 	                      nu=nu, hybprops=hybprops,
@@ -36,7 +36,7 @@ sim.bdh.age.help2 <-function(dummy,age,lambda,mu,
 	                      hyb.rate.fxn=hyb.rate.fxn,
 	                      frac=frac,mrca=mrca,
 	                      complete=complete,stochsampling=stochsampling,
-	                      trait.model=trait.model)
+	                      trait.model=trait.model,Ngene=Ngene)
 	out
 }
 
@@ -46,7 +46,7 @@ sim.bdh.age.loop2 <- function(age,
                              hyb.inher.fxn,
                              hyb.rate.fxn,
                              frac=1,mrca,complete,stochsampling,
-                             trait.model) {
+                             trait.model,Ngene) {
     phy <- sim2.bdh.origin2(m=0,n=0,
                            age=age,
                            lambda=lambda,mu=mu,
@@ -54,7 +54,7 @@ sim.bdh.age.loop2 <- function(age,
                            hyb.inher.fxn=hyb.inher.fxn,
                            hybprops=hybprops,hyb.rate.fxn=hyb.rate.fxn,
                            mrca=mrca,
-                           trait.model=trait.model)
+                           trait.model=trait.model,Ngene=Ngene)
 
     if( "phylo" %in% class(phy)){
       nleaves<-phy$nleaves
@@ -73,7 +73,7 @@ sim.bdh.age.loop2 <- function(age,
     phy
   }
 
-sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb.rate.fxn,mrca,trait.model){
+sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb.rate.fxn,mrca,trait.model,Ngene){
 
     ##TODO make edge a list and convert to a matrix at the end for quicker building
     hyb_edge<-list()    #list of hybrid edges
@@ -126,6 +126,13 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
     edge.length2 <- edge.length #edge.length2 is the tree that over estimate pairwise distance, while minimize the difference
     node <- "-1"
     hyb_edge.length <- NULL
+    #make a list of trees
+    trees <- list()
+    trees[[1]] <- list(edge=edge)
+    trees.prob <- 1
+    if (Ngene>0) {
+        trees <- rep(trees,Ngene)
+    }
     while (stop == 0 ){
       if (nleaves == 0){
         #phy2 = 0
@@ -188,11 +195,17 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
             edge.length <- c(edge.length,0,0)
             edge.length2 <- c(edge.length2,0,0)
             leaves <- c(leaves,maxspecies-1,maxspecies-2)
-
+            
             leaves <- leaves[- del]
             timecreation <- c(timecreation,time,time)
             timecreation[-species]<-time
-
+            
+            #update tree list
+            for (i in 1:length(trees)) {
+                trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species,maxspecies-1))
+                trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species,maxspecies-2))
+            }
+            
             #if(!is.null(hyb.rate.fxn)){
               ##update genetic distances
               new_species_rw<-genetic_dists[[as.character(species)]]
@@ -242,7 +255,7 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
             ##update edge lengths
             edge.length[edgespecevent] <- time-timecreation[- species]
             edge.length2[edgespecevent] <- time-timecreation[- species]
-
+            
             timecreation[-species]<-time
 
 			tip <- tip[-which(tip==species)]
@@ -301,6 +314,43 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                 edge.length <- c(edge.length,0,0,0,0)
                 edge.length2[edgespecevent] <- time-timecreation[- species] ##update the edge length of the lineages with the event
                 edge.length2 <- c(edge.length2,0,0,0,0)
+                
+                #update tree list
+                if (Ngene==0) {
+                trees2 <- trees
+                for (i in 1:length(trees)) {
+                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-2))
+                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[2],maxspecies-3))
+                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[parent],maxspecies-1))
+                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(maxspecies-1,maxspecies-4))
+                }
+                trees.prob <- trees.prob * inher #proportion of genes from species[parent]
+                for (i in 1:length(trees2)) {
+                    trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-2))
+                    trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-3))
+                    trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[-parent],maxspecies-1))
+                    trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(maxspecies-1,maxspecies-4))
+                }
+                trees <- c(trees,trees2)
+                trees.prob2 <- trees.prob * (1-inher) #proportion of genes from species[-parent]
+                trees.prob <- c(trees.prob,trees.prob2)
+                }
+                if (Ngene>0) {
+                    it <- sample.int(2,Ngene,replace=T,prob=c(inher,1-inher))
+                    for (i in 1:length(trees)) {
+                        if (it[i]==1) {
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-2))
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[2],maxspecies-3))
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[parent],maxspecies-1))
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(maxspecies-1,maxspecies-4))
+                        } else {
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-2))
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[2],maxspecies-3))
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[-parent],maxspecies-1))
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(maxspecies-1,maxspecies-4))
+                        }
+                    }
+                }
                 #if(!is.null(hyb.rate.fxn)){
                   ##update genetic distances
                   species1<-as.character(species[1])
@@ -387,6 +437,34 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                 ##update edge lengths
                 edge.length[edgespecevent] <- time-timecreation[- species]
                 edge.length<- c(edge.length,0) ##new edge for hybrid lineage
+                edge.length2[edgespecevent] <- time-timecreation[- species]
+                edge.length2<- c(edge.length2,0) ##new edge for hybrid lineage
+                
+                #update tree list
+                if (Ngene==0) {
+                trees2 <- trees
+                for (i in 1:length(trees)) {
+                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[parent],maxspecies-1))
+                }
+                trees.prob <- trees.prob * inher #proportion of genes from species[parent]
+                for (i in 1:length(trees2)) {
+                    trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[-parent],maxspecies-1))
+                }
+                trees <- c(trees,trees2)
+                trees.prob2 <- trees.prob * (1-inher) #proportion of genes from species[-parent]
+                trees.prob <- c(trees.prob,trees.prob2)
+                }
+                if (Ngene>0) {
+                    it <- sample.int(2,Ngene,replace=T,prob=c(inher,1-inher))
+                    for (i in 1:length(trees)) {
+                        if (it[i]==1) {
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[parent],maxspecies-1))
+                        } else {
+                            trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[-parent],maxspecies-1))
+                        }
+                    }
+                }
+                
                 #if(!is.null(hyb.rate.fxn)){
                   ##update genetic distances
                   species1<-as.character(species[1])
@@ -412,7 +490,7 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                   for(i in names(genetic_dists)){ ##add the new lineage as a column
                     genetic_dists[[i]][[species2]]<-NULL
                   }
-                  edge.length2[match(species1,edge[,2])] <- hybrid_species_row[[species1]]
+                  edge.length2[match(maxspecies1,edge[,2])] <- hybrid_species_row[[species1]]
                   hyb_edge.length <- c(hyb_edge.length,hybrid_species_row[[species2]])
                   }
                   if (parent==2) {
@@ -431,7 +509,7 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                   for(i in names(genetic_dists)){ ##add the new lineage as a column
                     genetic_dists[[i]][[species1]]<-NULL
                   }
-                  edge.length2[match(species2,edge[,2])] <- hybrid_species_row[[species2]]
+                  edge.length2[match(maxspecies1,edge[,2])] <- hybrid_species_row[[species2]]
                   hyb_edge.length <- c(hyb_edge.length, hybrid_species_row[[species1]])
                   }
                   #update genetic_dist2 in the same way
@@ -457,17 +535,94 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                 nleaves<-nleaves-1
 
               }else{ ##Lineage Neutral
-                parent <- ifelse((1-inher)>0.5,1,2) ##which parent has higher inheritance
+                parent <- ifelse((1-inher)<0.5,1,2) ##which parent has lower inheritance will be overflown by the other lineage
                 ##update leaves
                 leaves<-c(leaves,maxspecies-1:2) ##maxspecies-1 will be the hybrid and 'recipient' lineage while maxspecies-2 will be the 'donor' lineage
                 leaves <- leaves[- del]
                 ##update edge matrices
                 edge <- rbind(edge,c(species[1],maxspecies-1))
                 edge <- rbind(edge,c(species[2],maxspecies-2))
-                hyb_edge[[num_hybs]]<-c(species[-parent],species[parent])
+                hyb_edge[[num_hybs]]<-c(species[parent],species[-parent])
                 ##update edge lengths
                 edge.length[edgespecevent] <- time-timecreation[- species]
                 edge.length<- c(edge.length,0,0)
+                edge.length2[edgespecevent] <- time-timecreation[- species]
+                edge.length2<- c(edge.length2,0,0)
+                
+                #update tree list
+                #trees2 <- trees
+                #for (i in 1:length(trees)) {
+                #    if (parent==1) { #maxspecies-1 is the hybrid lineage
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-1))
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-2))
+                #    }
+                #    if (parent==2) { #maxspecies-2 is the hybrid lineage
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-1))
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-2))
+                #    }
+                #}
+                #trees.prob <- trees.prob * (1-inher) #proportion of genes from species[1]
+                #for (i in 1:length(trees2)) {
+                #    if (parent==1) { #maxspecies-1 is the hybrid lineage
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-1))
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-2))
+                #    }
+                #    if (parent==2) { #maxspecies-2 is the hybrid lineage
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-1))
+                #        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-2)) #combine this scenario with the trees_parent==1
+                #    }
+                #}
+                #trees <- c(trees,trees2)
+                #trees.prob2 <- trees.prob * inher  #proportion of genes from species[2]
+                #trees.prob <- c(trees.prob,trees.prob2)
+                for (i in 1:length(trees)) {
+                    if (parent==1) { #maxspecies-1 is the hybrid lineage
+                        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-1))
+                        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-2))
+                    }
+                    if (parent==2) { #maxspecies-2 is the hybrid lineage
+                        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-1))
+                        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[1],maxspecies-2))
+                        trees.prob[i] <- trees.prob[i] * (1-inher) #proportion of genes from species[1]
+                    }
+                }
+                if (parent==1) {
+                trees2 <- trees
+                trees.prob2 <- trees.prob * inher #proportion of genes from species[2]
+                    for (i in 1:length(trees2)) {
+                        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-1))
+                        trees2[[i]]$edge <- rbind(trees2[[i]]$edge,c(species[2],maxspecies-2))
+                    }
+                trees <- c(trees,trees2)
+                trees.prob <- c(trees.prob,trees.prob2)
+                }
+                
+                if (Ngene>0) {
+                    it <- sample.int(2,Ngene,replace=T,prob=c(inher,1-inher))
+                    for (i in 1:length(trees)) {
+                        if (it[i]==1) {
+                            if (parent==1) {
+                                trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[2],maxspecies-1))
+                                trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[2],maxspecies-2))
+                            }
+                            if (parent==2) {
+                                trees2[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-1))
+                                trees2[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-2))
+                            }
+                        } else {
+                            if (parent==1) {
+                                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-1))
+                                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[2],maxspecies-2))
+                            }
+                            if (parent==2) {
+                                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-1))
+                                    trees[[i]]$edge <- rbind(trees[[i]]$edge,c(species[1],maxspecies-2))
+                            }
+                        }
+                    }
+                }
+                            
+                
                 #if(!is.null(hyb.rate.fxn)){
                   ##update genetic distances
                   species1<-as.character(species[1])
@@ -496,8 +651,6 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                   }
                   genetic_dists[[maxspecies1]]<-hybrid_species_row
                   genetic_dists[[maxspecies1]][[maxspecies1]]<-0.0
-                  edge.length[match(species1,edge[,2])] <- hybrid_species_row[[species1]]
-                  hyb_edge.length <- c(hyb_edge.length,hybrid_species_row[[species2]])
                   }
                   if (parent==2) {
                   genetic_dists[[maxspecies1]]<-genetic_dists[[species1]] ##add the new lineage as a row
@@ -516,8 +669,6 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                   }
                   genetic_dists[[maxspecies2]]<-hybrid_species_row
                   genetic_dists[[maxspecies2]][[maxspecies2]]<-0.0
-                  edge.length[match(species2,edge[,2])] <- hybrid_species_row[[species2]]
-                  hyb_edge.length <- c(hyb_edge.length,hybrid_species_row[[species1]])
                   }
                   #update genetic_dists2 in the same way
                   if (parent==1) {
@@ -536,6 +687,8 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                   genetic_dists2[[maxspecies1]][[maxspecies1]]<-0.0
                   genetic_dists2[[maxspecies1]][[species1]]<-0.0
                   genetic_dists2[[species1]]<-genetic_dists2[[maxspecies1]]
+                  edge.length2[match(maxspecies1,edge[,2])] <- hybrid_species_row[[species1]]
+                  hyb_edge.length <- c(hyb_edge.length,hybrid_species_row[[species2]])
                   }
                   if (parent==2) {
                       genetic_dists2[[maxspecies1]]<-genetic_dists2[[species1]] ##add the new lineage as a row
@@ -553,6 +706,8 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
                       genetic_dists2[[maxspecies2]][[maxspecies2]]<-0.0
                       genetic_dists2[[maxspecies2]][[species2]]<-0.0
                       genetic_dists2[[species2]]<-genetic_dists2[[maxspecies2]]
+                      edge.length2[match(maxspecies2,edge[,2])] <- hybrid_species_row[[species2]]
+                      hyb_edge.length <- c(hyb_edge.length,hybrid_species_row[[species1]])
                   }
                 #}
                 if(!is_null_trait){
@@ -587,6 +742,7 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
         for (j in (1:length(leaves))){
           k = which( edge == leaves[j]  ) - length(edge.length)
           edge.length[ k ] <- time - timecreation[- leaves[j]]
+          edge.length2[ k ] <- time - timecreation[- leaves[j]]
         }
         timecreation[-leaves]<-age
       }
@@ -708,15 +864,39 @@ sim2.bdh.origin2 <- function(m=0,n=0,age,lambda,mu,nu,hyb.inher.fxn,hybprops,hyb
       }
     }
     if (!is.null(phy$edge)) {
-    phy$node.label=name_table[match(phy$edge[1,1]-1+c(1:phy$Nnode),name_table[,2]),1]
-    phy$tip.label=name_table[match(1:(phy$edge[1,1]-1),name_table[,2]),1]
+    phy$node.label <- name_table[match(phy$edge[1,1]-1+c(1:phy$Nnode),name_table[,2]),1]
+    phy$tip.label <- name_table[match(1:(phy$edge[1,1]-1),name_table[,2]),1]
     }
-    list(phy=phy,name_table=name_table,distance=genetic_dists2)
+    #translate trees into newick format
+    trees.new <- trees
+    for (i in 1:length(trees.new)) {
+        for (j in 1:dim(name_table)[1]) {
+            trees.new[[i]]$edge[trees.new[[i]]$edge==name_table[j,1]] <- name_table[j,2]
+        }
+        trees.new[[i]]$Nnode <- phy$Nnode
+        trees.new[[i]]$tip.label <- phy$tip.label
+        class(trees.new[[i]]) <- c("evonet","phylo")
+        trees.new[[i]] <- ape::write.tree(trees.new[[i]])
+    }
+    
+    list(phy=phy,name_table=name_table,distance=genetic_dists2,trees=trees,trees.prob=trees.prob,trees.new=trees.new)
   }
 
-
-#sim <- sim.bdh.age(age=2,numbsim=1,lambda=1,mu=0.2,nu=0.25,hybprops=c(0,0,1),hyb.inher.fxn=inheritance,fxn,complete=F)
+#example
+#library(ape)
+#library(SiPhyNetwork)
+#inheritance.fxn <- make.uniform.draw()
+#sim <- sim.bdh.age(age=2,numbsim=1,lambda=1,mu=0.2,nu=0.25,hybprops=c(1,0,0),hyb.inher.fxn=inheritance.fxn,complete=F,Ngene=100)
 #phy <- sim[[1]]$phy
 #plot(phy,show.node.label=T)
 #edgelabels(phy$edge.length,frame = "none", adj = c(0.5, -0.5))
+
+#get unique trees and count how many genes have the same tree
+#unique_trees <- unique(trees.new)
+#n_trees <- length(unique_trees)
+#count <- numeric(n_trees)
+#for (i in 1:length(trees.new)) {
+#    for (j in 1:n_trees)
+#        count[j] <- count[j] + all(trees.new[[i]]==unique_trees[[j]])
+#}
 
