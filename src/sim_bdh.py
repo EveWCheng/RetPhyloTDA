@@ -5,6 +5,8 @@ Python port of sim.bdh.age.help.2_update.R
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 import networkx as nx
 from dataclasses import dataclass
@@ -29,9 +31,10 @@ class PhyloNetwork:
         edge_type     -- 'tree' or 'reticulation'
         length        -- float: genetic-distance-based branch length
         time_length   -- float: time-based branch length
+        inher_weight  -- float, only on edges entering a reticulation node (in-degree 2):
+                         probability that a gene's true history takes this edge
     """
     G: nx.DiGraph
-    inheritance: np.ndarray     # one value per hybridization event
     nleaves: int                # number of extant (non-extinct) leaves
     tip_states: Optional[dict] = None   # {species label: trait value}, only if a trait_model was used
 
@@ -55,6 +58,30 @@ class PhyloNetwork:
         edges = [(u, v) for u, v, attrs in self.G.edges(data=True) if gene_index in attrs.get('genes', set())]
         return self.G.edge_subgraph(edges)
 
+    def enumerate_gene_trees(self) -> list[tuple[nx.DiGraph, float]]:
+        """Every possible resolved gene tree topology, with its exact probability.
+
+        Equivalent to the R port's Ngene=0 mode: at each reticulation node
+        (in-degree 2) a gene takes exactly one of the two incoming edges, so
+        the full topology space is the Cartesian product of those choices
+        across all reticulation nodes, weighted by 'inher_weight'.
+
+        Have not checked **Eve**
+        """
+        retic_nodes = [n for n in self.G if self.G.in_degree(n) == 2]
+        choices = [list(self.G.in_edges(n, data='inher_weight')) for n in retic_nodes]
+
+        results = []
+        for combo in itertools.product(*choices):
+            chosen = {(u, v) for u, v, _ in combo}
+            dropped = {(u, v) for edges in choices for u, v, _ in edges} - chosen
+            weight = 1.0
+            for _, _, w in combo:
+                weight *= w
+            kept = [(u, v) for u, v in self.G.edges() if (u, v) not in dropped]
+            results.append((self.G.edge_subgraph(kept), weight))
+        return results
+
 
 
 TRAIT_MODEL_KEYS = {'initial', 'time_fxn', 'spec_fxn', 'hyb_event_fxn', 'hyb_compatibility_fxn'}
@@ -72,7 +99,6 @@ class SimState:
         self.trait_model = trait_model
 
         self.leaves: set[int] = set()   # IDs of currently active leaves
-        self.inheritance: list[float] = []
         self._id = 0   # node ID counter; increments with every new node
 
         if trait_model is not None:
@@ -165,8 +191,13 @@ class SimState:
     def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None):
         """Shared opening for all hybridization events.
 
-        Returns (primary, secondary, primary_inher, secondary_inher, d12).
+        Returns (primary, secondary, primary_inher, secondary_inher, d12,
+        primary_genes, secondary_genes, parent_of_primary).
         Seals both parent edges and removes them from active leaves.
+        parent_of_primary is primary's pre-existing ancestor, needed by
+        hyb_degenerative/hyb_neutral to retroactively tag that edge's
+        inher_weight once it becomes one of two incoming edges at a
+        reticulation node.
         """
         d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2)
 
@@ -175,11 +206,12 @@ class SimState:
         primary_inher   = (1 - inher) if primary == sp1 else inher
         secondary_inher = 1 - primary_inher
 
+        parent_of_primary = None
         for sp in (sp1, sp2):
-            self._seal_incoming(sp)
+            parent = self._seal_incoming(sp)
             self.leaves.discard(sp)
-
-        self.inheritance.append(inher)
+            if sp == primary:
+                parent_of_primary = parent
 
         if self.Ngene > 0:
             k = np.random.binomial(self.Ngene, primary_inher)
@@ -189,13 +221,14 @@ class SimState:
             primary_genes = set()
             secondary_genes = set()
 
-        return primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes
+        return (primary, secondary, primary_inher, secondary_inher, d12,
+                primary_genes, secondary_genes, parent_of_primary)
 
     def hyb_generating(self, sp1: int, sp2: int, inher: float, d12: float | None = None,hyb_trait=None):
         """LG: both parents continue; new hybrid node + leaf added."""
         if self.trait_model is not None:
             sp1_trait, sp2_trait = self.G.nodes[sp1]['trait'], self.G.nodes[sp2]['trait']
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes = self._hyb_setup(sp1, sp2, inher, d12)
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, _ = self._hyb_setup(sp1, sp2, inher, d12)
 
         leaf_p   = self._new_node(is_leaf=True)   # primary parent continuation
         leaf_s   = self._new_node(is_leaf=True)   # secondary parent continuation
@@ -205,9 +238,9 @@ class SimState:
         all_genes = set(range(self.Ngene))
         self.G.add_edge(sp1, leaf_p,  edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
         self.G.add_edge(sp2, leaf_s,  edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
-        self.G.add_edge(primary,   hyb_node, edge_type='tree', length=secondary_inher * d12, time_length=0.0, genes=primary_genes)
+        self.G.add_edge(primary,   hyb_node, edge_type='tree', length=secondary_inher * d12, time_length=0.0, genes=primary_genes, inher_weight=primary_inher)
         self.G.add_edge(hyb_node,  hyb_leaf, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
-        self.G.add_edge(secondary, hyb_node, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes)
+        self.G.add_edge(secondary, hyb_node, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
 
         self.leaves.update({leaf_p, leaf_s, hyb_leaf})
 
@@ -219,12 +252,14 @@ class SimState:
     def hyb_degenerative(self, sp1: int, sp2: int, inher: float, d12: float | None = None,
                          hyb_trait=None):
         """LD: secondary parent absorbed; primary continues as the hybrid leaf."""
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes = self._hyb_setup(sp1, sp2, inher, d12)
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = \
+            self._hyb_setup(sp1, sp2, inher, d12)
 
         hyb_leaf = self._new_node(is_leaf=True)
 
         self.G.add_edge(primary,   hyb_leaf, edge_type='tree', length=0.0, time_length=0.0, genes=primary_genes)
-        self.G.add_edge(secondary, primary,  edge_type='reticulation', length=secondary_inher * d12, time_length=0.0, genes=secondary_genes)
+        self.G.add_edge(secondary, primary,  edge_type='reticulation', length=secondary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
+        self.G[parent_of_primary][primary]['inher_weight'] = primary_inher
 
         self.G.nodes[secondary]['hyb_source'] = True
         self.leaves.add(hyb_leaf)
@@ -235,7 +270,7 @@ class SimState:
     def hyb_neutral(self, sp1: int, sp2: int, inher: float, d12: float | None = None,
                     hyb_trait=None):
         """LN: both parents continue; primary's lineage carries the hybrid genome."""
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes = \
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = \
             self._hyb_setup(sp1, sp2, inher, d12)
 
         if self.trait_model is not None:
@@ -247,7 +282,8 @@ class SimState:
         all_genes = set(range(self.Ngene))
         self.G.add_edge(primary,   hyb_leaf,   edge_type='tree', length=0.0, time_length=0.0, genes=primary_genes)
         self.G.add_edge(secondary, donor_leaf, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
-        self.G.add_edge(secondary, primary, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes)
+        self.G.add_edge(secondary, primary, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
+        self.G[parent_of_primary][primary]['inher_weight'] = primary_inher
 
         self.leaves.update({hyb_leaf, donor_leaf})
 
@@ -385,7 +421,6 @@ def _build_output(state: SimState) -> dict:
 
     phy = PhyloNetwork(
         G=state.G,
-        inheritance=np.array(state.inheritance),
         nleaves=len(state.leaves),
         tip_states=tip_states,
     )
