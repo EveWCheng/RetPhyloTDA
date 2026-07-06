@@ -38,5 +38,3 @@ def export_csv(phy: PhyloNetwork, out_dir: str, prefix: str = ""):
         for u, v, attrs in phy.G.edges(data=True):
             w.writerow([u, v, attrs["edge_type"], attrs["length"], attrs["time_length"]])
 
-    print(f"Nodes written to {nodes_path}")
-    print(f"Edges written to {edges_path}")

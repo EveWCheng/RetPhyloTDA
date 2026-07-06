@@ -10,7 +10,7 @@ import itertools
 import numpy as np
 import networkx as nx
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Optional
 
 
 @dataclass
@@ -54,9 +54,22 @@ class PhyloNetwork:
     def Nnode(self) -> int:
         return sum(1 for n in self.G if not self.G.nodes[n]['is_leaf'])
 
+#get tree for a particular gene
     def gene_tree(self, gene_index: int) -> nx.DiGraph:
         edges = [(u, v) for u, v, attrs in self.G.edges(data=True) if gene_index in attrs.get('genes', set())]
         return self.G.edge_subgraph(edges)
+
+    def filter_nodes(self, which_nodes: str = "all_nodes") -> nx.DiGraph:
+        """Induced subgraph for the requested node subset.
+
+        all_nodes     -- every node except extinct tips (label starts with 'ext')
+        species_only  -- only surviving species tips (label contains 'sp')
+        """
+        if which_nodes == "species_only":
+            keep = [n for n, label in self.G.nodes(data="label") if "sp" in label]
+        else:
+            keep = [n for n, label in self.G.nodes(data="label") if not label.startswith("ext")]
+        return self.G.subgraph(keep).copy()
 
     def enumerate_gene_trees(self) -> list[tuple[nx.DiGraph, float]]:
         """Every possible resolved gene tree topology, with its exact probability.
@@ -298,29 +311,8 @@ def _nchoose2(n: int) -> int:
     return n * (n - 1) // 2
 
 
-def sim_bdh_age(age: float, numbsim: int,
-                lambda_: float, mu: float, nu: float,
-                hybprops: list[float], hyb_inher_fxn: Callable,
-                mrca: bool = False,
-                hyb_rate_fxn: Optional[Callable] = None,
-                Ngene: int = 0,
-                trait_model: Optional[dict] = None) -> list[dict]:
-    """Run numbsim independent BDH simulations and return a list of result dicts.
-
-    trait_model, if given, must supply callables under these keys:
-        initial                  -- sequence of starting trait value(s), one per root leaf
-        time_fxn(trait, dt)      -- evolve one lineage's trait over elapsed time dt
-        spec_fxn(trait)          -- trait -> (child1_trait, child2_trait) at speciation
-        hyb_event_fxn(t1, t2, inher)         -- parents' traits + inheritance -> hybrid trait
-        hyb_compatibility_fxn(t1, t2, hyb_trait) -- bool: whether the hybridization can occur
-    """
-    return [_sim_one(age, lambda_, mu, nu, hybprops, hyb_inher_fxn, mrca, hyb_rate_fxn, Ngene, trait_model) for _ in range(numbsim)]
-
-
-def _sim_one(age, lambda_, mu, nu, hybprops, hyb_inher_fxn, mrca, hyb_rate_fxn, Ngene, trait_model=None) -> dict:
-    """Run one BDH simulation; return {phy: PhyloNetwork | 0, distance: dict}."""
-    state = SimState(mrca=mrca, Ngene=Ngene, trait_model=trait_model)
-
+def _sim_one(state: SimState, age, lambda_, mu, nu, hybprops, hyb_inher_fxn, hyb_rate_fxn) -> dict:
+    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict}."""
     while True:
         n = len(state.leaves)
         if n == 0:
@@ -408,7 +400,7 @@ def _assign_labels(G: nx.DiGraph):
         G.nodes[n]['label'] = label
 
 
-def _build_output(state: SimState) -> dict:
+def _build_output(state: SimState):
     _assign_labels(state.G)
 
     tip_states = None
@@ -424,6 +416,5 @@ def _build_output(state: SimState) -> dict:
         nleaves=len(state.leaves),
         tip_states=tip_states,
     )
-    distance = dict(nx.all_pairs_dijkstra_path_length(state.G.to_undirected(),
-                                                       weight='length'))
+    distance = dict(nx.all_pairs_dijkstra_path_length(state.G.to_undirected(),weight='length'))
     return {'phy': phy, 'distance': distance}
