@@ -23,7 +23,11 @@ class PhyloNetwork:
         is_leaf       -- bool
         timecreation  -- float
         extinct       -- bool: tip went extinct (not a hybrid source)
-        hyb_source    -- bool: tip is a hybrid donor
+        is_hyb_node   -- bool: internal node where two lineages merge into one
+                         continuing branch (the hyb_node in hyb_generating, or
+                         primary in hyb_degenerative/hyb_neutral)
+        is_hyb_leaf   -- bool: leaf carrying the hybrid genome produced by a
+                         hybridization event
         label         -- str: assigned at output time
         trait         -- present only if a trait_model was supplied
 
@@ -48,7 +52,7 @@ class PhyloNetwork:
 
     @property
     def hyb_tips(self) -> list[int]:
-        return [n for n in self.G if self.G.nodes[n].get('hyb_source', False)]
+        return [n for n in self.G if self.G.nodes[n].get('is_hyb_leaf', False)]
 
     @property
     def Nnode(self) -> int:
@@ -59,17 +63,18 @@ class PhyloNetwork:
         edges = [(u, v) for u, v, attrs in self.G.edges(data=True) if gene_index in attrs.get('genes', set())]
         return self.G.edge_subgraph(edges)
 
-    def filter_nodes(self, which_nodes: str = "all_nodes") -> nx.DiGraph:
+    def filter_nodes(self, which_nodes: str = "no_hyb_nodes") -> nx.DiGraph:
         """Induced subgraph for the requested node subset.
 
         all_nodes     -- every node except extinct tips (label starts with 'ext')
-        species_only  -- only surviving species tips (label contains 'sp')
+        no_hyb_nodes  -- all_nodes, with internal hybrid-junction nodes collapsed
+                         out so hyb_leaf tips connect directly to primary/secondary
         """
-        if which_nodes == "species_only":
-            keep = [n for n, label in self.G.nodes(data="label") if "sp" in label]
-        else:
-            keep = [n for n, label in self.G.nodes(data="label") if not label.startswith("ext")]
-        return self.G.subgraph(keep).copy()
+        keep = [n for n, label in self.G.nodes(data="label") if not label.startswith("ext")]
+        G = self.G.subgraph(keep).copy()
+        if which_nodes == "no_hyb_nodes":
+            G = _collapse_hyb_nodes(G)
+        return G
 
     def enumerate_gene_trees(self) -> list[tuple[nx.DiGraph, float]]:
         """Every possible resolved gene tree topology, with its exact probability.
@@ -234,8 +239,7 @@ class SimState:
             primary_genes = set()
             secondary_genes = set()
 
-        return (primary, secondary, primary_inher, secondary_inher, d12,
-                primary_genes, secondary_genes, parent_of_primary)
+        return (primary, secondary, primary_inher, secondary_inher, d12,primary_genes, secondary_genes, parent_of_primary)
 
     def hyb_generating(self, sp1: int, sp2: int, inher: float, d12: float | None = None,hyb_trait=None):
         """LG: both parents continue; new hybrid node + leaf added."""
@@ -255,6 +259,8 @@ class SimState:
         self.G.add_edge(hyb_node,  hyb_leaf, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
         self.G.add_edge(secondary, hyb_node, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
 
+        self.G.nodes[hyb_node]['is_hyb_node'] = True
+        self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.update({leaf_p, leaf_s, hyb_leaf})
 
         if self.trait_model is not None:
@@ -274,7 +280,8 @@ class SimState:
         self.G.add_edge(secondary, primary,  edge_type='reticulation', length=secondary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
         self.G[parent_of_primary][primary]['inher_weight'] = primary_inher
 
-        self.G.nodes[secondary]['hyb_source'] = True
+        self.G.nodes[primary]['is_hyb_node'] = True
+        self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.add(hyb_leaf)
 
         if self.trait_model is not None:
@@ -283,8 +290,7 @@ class SimState:
     def hyb_neutral(self, sp1: int, sp2: int, inher: float, d12: float | None = None,
                     hyb_trait=None):
         """LN: both parents continue; primary's lineage carries the hybrid genome."""
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = \
-            self._hyb_setup(sp1, sp2, inher, d12)
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = self._hyb_setup(sp1, sp2, inher, d12)
 
         if self.trait_model is not None:
             secondary_trait = self.G.nodes[secondary]['trait']
@@ -298,6 +304,8 @@ class SimState:
         self.G.add_edge(secondary, primary, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
         self.G[parent_of_primary][primary]['inher_weight'] = primary_inher
 
+        self.G.nodes[primary]['is_hyb_node'] = True
+        self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.update({hyb_leaf, donor_leaf})
 
         if self.trait_model is not None:
@@ -387,14 +395,41 @@ def _finalize_pendant_edges(state: SimState):
         state._seal_edge(parent, leaf)
 
 
+def _collapse_hyb_nodes(G: nx.DiGraph) -> nx.DiGraph:
+    """Bypass internal hybrid-junction nodes (is_hyb_node=True).
+
+    Each such node has two predecessors (primary, secondary) and one
+    successor (the hyb_leaf). Removing it naively would disconnect the
+    hyb_leaf from its parents, so instead we reconnect each predecessor
+    directly to each successor, summing length/time_length across the
+    two collapsed edges and keeping the predecessor edge's edge_type/
+    genes/inher_weight (which distinguish the primary vs. secondary side).
+    """
+    G = G.copy()
+    hyb_nodes = [n for n, flag in G.nodes(data="is_hyb_node") if flag]
+    for node in hyb_nodes:
+        preds = list(G.predecessors(node))
+        succs = list(G.successors(node))
+        for p in preds:
+            pred_attrs = G.edges[p, node]
+            for s in succs:
+                succ_attrs = G.edges[node, s]
+                new_attrs = dict(pred_attrs)
+                new_attrs['length'] = pred_attrs.get('length', 0.0) + succ_attrs.get('length', 0.0)
+                new_attrs['time_length'] = pred_attrs.get('time_length', 0.0) + succ_attrs.get('time_length', 0.0)
+                G.add_edge(p, s, **new_attrs)
+        G.remove_node(node)
+    return G
+
+
 def _assign_labels(G: nx.DiGraph):
     for n, attrs in G.nodes(data=True):
         if attrs.get('extinct'):
             label = f"ext{n}"
-        elif attrs.get('hyb_source'):
-            label = f"hyb{n}"
         elif attrs['is_leaf']:
-            label = f"sp{n}"
+            label = f"sp{n}"  # checked before is_hyb_leaf: an extant hybrid-leaf tip must read "sp", not "hyb"
+        elif attrs.get('is_hyb_leaf'):
+            label = f"hyb{n}"
         else:
             label = f"-{n}"
         G.nodes[n]['label'] = label
@@ -408,7 +443,7 @@ def _build_output(state: SimState):
         tip_states = {
             attrs['label']: attrs['trait']
             for n, attrs in state.G.nodes(data=True)
-            if attrs['is_leaf'] or attrs.get('extinct') or attrs.get('hyb_source')
+            if attrs['is_leaf'] or attrs.get('extinct') or attrs.get('is_hyb_leaf')
         }
 
     phy = PhyloNetwork(

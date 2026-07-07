@@ -24,8 +24,8 @@ def export_csv(phy: PhyloNetwork, out_dir: str, prefix: str = ""):
         for n, attrs in phy.G.nodes(data=True):
             if attrs.get("extinct"):
                 ntype = "extinct"
-            elif attrs.get("hyb_source"):
-                ntype = "hyb_source"
+            elif attrs.get("is_hyb_leaf"):
+                ntype = "hyb_leaf"
             elif attrs["is_leaf"]:
                 ntype = "leaf"
             else:
