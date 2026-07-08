@@ -10,7 +10,7 @@ from tqdm.std import TqdmDefaultWriteLock
 # multiprocessing.resource_tracker at interpreter shutdown.
 TqdmDefaultWriteLock.mp_lock = None
 
-from sim_bdh import SimState, _sim_one
+from sim_bdh import SimState, SimParams, _sim_one
 from export import export_csv
 from find_cycles import find_cycles
 
@@ -34,10 +34,11 @@ def sim_bdh_age(age: float, numbsim: int,
         hyb_event_fxn(t1, t2, inher)         -- parents' traits + inheritance -> hybrid trait
         hyb_compatibility_fxn(t1, t2, hyb_trait) -- bool: whether the hybridization can occur
     """
+    params = SimParams(age=age, lambda_=lambda_, mu=mu, nu=nu, hybprops=hybprops, hyb_inher_fxn=hyb_inher_fxn, hyb_rate_fxn=hyb_rate_fxn)
     results = []
     for i in range(numbsim):
         state = SimState(mrca=mrca, Ngene=Ngene, trait_model=trait_model)
-        result = _sim_one(state, age, lambda_, mu, nu, hybprops, hyb_inher_fxn, hyb_rate_fxn)
+        result = _sim_one(state, params)
         if result["phy"] != 0:
             size = result['phy'].G.number_of_nodes()
             print(f"size for {i}: {size}")

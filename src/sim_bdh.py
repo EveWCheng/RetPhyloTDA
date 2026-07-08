@@ -37,6 +37,7 @@ class PhyloNetwork:
         time_length   -- float: time-based branch length
         inher_weight  -- float, only on edges entering a reticulation node (in-degree 2):
                          probability that a gene's true history takes this edge
+        genes         -- set[int]: which gene indices (0..Ngene-1) resolve their history through this edge. On ordinary (in-degree 1) edges this is always the full gene set. On the two edges entering a reticulation node it partitions the full gene set between them, so gene_tree() can pick exactly one parent per locus.
     """
     G: nx.DiGraph
     nleaves: int                # number of extant (non-extinct) leaves
@@ -75,31 +76,6 @@ class PhyloNetwork:
         if which_nodes == "no_hyb_nodes":
             G = _collapse_hyb_nodes(G)
         return G
-
-    def enumerate_gene_trees(self) -> list[tuple[nx.DiGraph, float]]:
-        """Every possible resolved gene tree topology, with its exact probability.
-
-        Equivalent to the R port's Ngene=0 mode: at each reticulation node
-        (in-degree 2) a gene takes exactly one of the two incoming edges, so
-        the full topology space is the Cartesian product of those choices
-        across all reticulation nodes, weighted by 'inher_weight'.
-
-        Have not checked **Eve**
-        """
-        retic_nodes = [n for n in self.G if self.G.in_degree(n) == 2]
-        choices = [list(self.G.in_edges(n, data='inher_weight')) for n in retic_nodes]
-
-        results = []
-        for combo in itertools.product(*choices):
-            chosen = {(u, v) for u, v, _ in combo}
-            dropped = {(u, v) for edges in choices for u, v, _ in edges} - chosen
-            weight = 1.0
-            for _, _, w in combo:
-                weight *= w
-            kept = [(u, v) for u, v in self.G.edges() if (u, v) not in dropped]
-            results.append((self.G.edge_subgraph(kept), weight))
-        return results
-
 
 
 TRAIT_MODEL_KEYS = {'initial', 'time_fxn', 'spec_fxn', 'hyb_event_fxn', 'hyb_compatibility_fxn'}
@@ -271,8 +247,7 @@ class SimState:
     def hyb_degenerative(self, sp1: int, sp2: int, inher: float, d12: float | None = None,
                          hyb_trait=None):
         """LD: secondary parent absorbed; primary continues as the hybrid leaf."""
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = \
-            self._hyb_setup(sp1, sp2, inher, d12)
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = self._hyb_setup(sp1, sp2, inher, d12)
 
         hyb_leaf = self._new_node(is_leaf=True)
 
@@ -319,23 +294,40 @@ def _nchoose2(n: int) -> int:
     return n * (n - 1) // 2
 
 
-def _sim_one(state: SimState, age, lambda_, mu, nu, hybprops, hyb_inher_fxn, hyb_rate_fxn) -> dict:
+@dataclass
+class SimParams:
+    """Rate/config parameters governing the Gillespie loop of one BDH run.
+
+    Kept separate from SimState because none of these are used by
+    SimState's own mutation methods (speciation, hyb_generating, ...) --
+    they only decide which event to fire and when to stop the loop.
+    """
+    age: float                       # simulation stops once state.time reaches this
+    lambda_: float                   # per-lineage speciation rate
+    mu: float                        # per-lineage extinction rate
+    nu: float                        # per-lineage-pair hybridization rate
+    hybprops: list[float]            # relative weights [generating, degenerative, neutral] for picking the hyb type once a hybridization event fires
+    hyb_inher_fxn: callable          # () -> inheritance probability (share of genome from sp1) for a hybridization event
+    hyb_rate_fxn: Optional[callable] = None  # d12 -> acceptance probability; None disables distance-dependent rejection
+
+
+def _sim_one(state: SimState, params: SimParams) -> dict:
     """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict}."""
     while True:
         n = len(state.leaves)
         if n == 0:
             return {'phy': 0, 'distance': None}
 
-        spec_rate  = n * lambda_
-        ext_rate   = n * mu
-        hyb_rate   = _nchoose2(n) * nu
+        spec_rate  = n * params.lambda_
+        ext_rate   = n * params.mu
+        hyb_rate   = _nchoose2(n) * params.nu
         total_rate = spec_rate + ext_rate + hyb_rate
 
         state.timestep = np.random.exponential(1.0 / total_rate)
         state.time    += state.timestep
 
-        if state.time >= age:
-            state.time = age
+        if state.time >= params.age:
+            state.time = params.age
             break
 
         if state.trait_model is not None:
@@ -349,7 +341,7 @@ def _sim_one(state: SimState, age, lambda_, mu, nu, hybprops, hyb_inher_fxn, hyb
         elif rand < (spec_rate + ext_rate) / total_rate:
             state.extinction(sp1)
         else:
-            _try_hybridization(state, sp1, hybprops, hyb_inher_fxn, hyb_rate_fxn)
+            _try_hybridization(state, sp1, params)
 
     _finalize_pendant_edges(state)
     return _build_output(state)
@@ -359,10 +351,9 @@ def _sample_one(leaves: set[int]) -> int:
     return int(np.random.choice(list(leaves)))
 
 
-def _try_hybridization(state: SimState, sp1,
-                       hybprops, hyb_inher_fxn, hyb_rate_fxn):
+def _try_hybridization(state: SimState, sp1, params: SimParams):
     sp2 = _sample_one(state.leaves - {sp1})
-    inher = hyb_inher_fxn()
+    inher = params.hyb_inher_fxn()
     d12 = None
     hyb_trait = None
 
@@ -372,11 +363,12 @@ def _try_hybridization(state: SimState, sp1,
         if not state.trait_model['hyb_compatibility_fxn'](sp1_trait, sp2_trait, hyb_trait):
             return
 
-    if hyb_rate_fxn is not None:
+    if params.hyb_rate_fxn is not None:
         d12 = state.tip_distance(sp1, sp2)
-        if np.random.uniform() > hyb_rate_fxn(d12):
+        if np.random.uniform() > params.hyb_rate_fxn(d12):
             return
 
+    hybprops = params.hybprops
     total = sum(hybprops)
     rand  = np.random.uniform()
 
@@ -398,12 +390,7 @@ def _finalize_pendant_edges(state: SimState):
 def _collapse_hyb_nodes(G: nx.DiGraph) -> nx.DiGraph:
     """Bypass internal hybrid-junction nodes (is_hyb_node=True).
 
-    Each such node has two predecessors (primary, secondary) and one
-    successor (the hyb_leaf). Removing it naively would disconnect the
-    hyb_leaf from its parents, so instead we reconnect each predecessor
-    directly to each successor, summing length/time_length across the
-    two collapsed edges and keeping the predecessor edge's edge_type/
-    genes/inher_weight (which distinguish the primary vs. secondary side).
+    Each such node has two predecessors (primary, secondary) and one successor (the hyb_leaf). Removing it naively would disconnect the hyb_leaf from its parents, so instead we reconnect each predecessor directly to each successor, summing length/time_length across the two collapsed edges and keeping the predecessor edge's edge_type/genes/inher_weight (which distinguish the primary vs. secondary side).
     """
     G = G.copy()
     hyb_nodes = [n for n, flag in G.nodes(data="is_hyb_node") if flag]
@@ -420,6 +407,33 @@ def _collapse_hyb_nodes(G: nx.DiGraph) -> nx.DiGraph:
                 G.add_edge(p, s, **new_attrs)
         G.remove_node(node)
     return G
+
+
+def enumerate_gene_trees(G: nx.DiGraph) -> list[tuple[nx.DiGraph, float]]:
+    """Every possible resolved gene tree topology of G, with its exact probability.
+
+    Equivalent to the R port's Ngene=0 mode: at each reticulation node
+    (in-degree 2) a gene takes exactly one of the two incoming edges, so
+    the full topology space is the Cartesian product of those choices
+    across all reticulation nodes, weighted by 'inher_weight'. Works on
+    any nx.DiGraph carrying 'inher_weight' on its reticulation edges,
+    e.g. phy.G directly or the output of phy.filter_nodes().
+    """
+    retic_nodes = [n for n in G if G.in_degree(n) == 2]
+    choices = [list(G.in_edges(n, data='inher_weight')) for n in retic_nodes]
+
+    results = []
+    for combo in itertools.product(*choices):
+        chosen = {(u, v) for u, v, _ in combo}
+        dropped = {(u, v) for edges in choices for u, v, _ in edges} - chosen
+        weight = 1.0
+        for _, _, w in combo:
+            weight *= w
+        kept = [(u, v) for u, v in G.edges() if (u, v) not in dropped]
+        tree = nx.DiGraph()
+        tree.add_edges_from(kept)
+        results.append((tree, weight))
+    return results
 
 
 def _assign_labels(G: nx.DiGraph):
