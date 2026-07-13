@@ -13,6 +13,8 @@ TqdmDefaultWriteLock.mp_lock = None
 from sim_bdh import SimState, SimParams, _sim_one
 from export import export_csv
 from find_cycles import find_cycles
+import cProfile, pstats
+from pstats import SortKey
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, os.pardir, "Outputs", "phylo_outputs")
@@ -54,7 +56,7 @@ NUMBSIM  = 30
 LAMBDA   = 0.5
 MU       = 0.1
 NU       = 0.5
-HYBPROPS = [1, 1, 1]   # [lineage generating, degenerative, neutral]
+HYBPROPS = [1, 0, 1]   # [lineage generating, degenerative, neutral]
 MIN_CYCLE_LENGTH = 4
 
 hyb_inher_fxn = lambda: np.random.uniform(0, 1)
@@ -63,7 +65,7 @@ hyb_rate_fxn  = None
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
-def main(seed=None, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_nodes"):
+def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_nodes"):
     if seed is not None:
         np.random.seed(seed)
 
@@ -99,9 +101,15 @@ def main(seed=None, gene_index: Optional[int] = None, which_nodes: str = "no_hyb
 
         if gene_index is not None:
             gtree = phy.gene_tree(gene_index)
-            print(f"  gene {gene_index}: {gtree.number_of_nodes()} nodes, "
-                  f"{gtree.number_of_edges()} edges")
+#            print(f"  gene {gene_index}: {gtree.number_of_nodes()} nodes, ",f"{gtree.number_of_edges()} edges")
 
 
 if __name__ == "__main__":
-    main(seed=42)
+    pr = cProfile.Profile()
+    pr.enable()
+    main()
+    pr.disable()
+    sortby = SortKey.CUMULATIVE
+    with open("profile", "w") as f:
+        ps = pstats.Stats(pr, stream=f).sort_stats(sortby)
+        ps.print_stats()

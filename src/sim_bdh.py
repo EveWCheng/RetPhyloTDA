@@ -6,6 +6,7 @@ Python port of sim.bdh.age.help.2_update.R
 from __future__ import annotations
 
 import itertools
+import random
 
 import numpy as np
 import networkx as nx
@@ -309,6 +310,7 @@ class SimParams:
     hybprops: list[float]            # relative weights [generating, degenerative, neutral] for picking the hyb type once a hybridization event fires
     hyb_inher_fxn: callable          # () -> inheritance probability (share of genome from sp1) for a hybridization event
     hyb_rate_fxn: Optional[callable] = None  # d12 -> acceptance probability; None disables distance-dependent rejection
+    stopping_num_leaves: Optional[int] = None  # simulation also stops once state.leaves reaches this count
 
 
 def _sim_one(state: SimState, params: SimParams) -> dict:
@@ -317,6 +319,8 @@ def _sim_one(state: SimState, params: SimParams) -> dict:
         n = len(state.leaves)
         if n == 0:
             return {'phy': 0, 'distance': None}
+        if params.stopping_num_leaves is not None and n >= params.stopping_num_leaves:
+            break
 
         spec_rate  = n * params.lambda_
         ext_rate   = n * params.mu
@@ -409,29 +413,65 @@ def _collapse_hyb_nodes(G: nx.DiGraph) -> nx.DiGraph:
     return G
 
 
-def enumerate_gene_trees(G: nx.DiGraph) -> list[tuple[nx.DiGraph, float]]:
-    """Every possible resolved gene tree topology of G, with its exact probability.
+def _suppress_unary_nodes(tree: nx.DiGraph) -> nx.DiGraph:
+    tree = tree.copy()
+    while True:
+        dead_ends = [n for n in tree if tree.out_degree(n) == 0 and not tree.nodes[n].get('is_leaf', False)]
+        if dead_ends:
+            tree.remove_node(dead_ends[0])
+            print("removed", dead_ends[0])
+            continue
 
-    Equivalent to the R port's Ngene=0 mode: at each reticulation node
-    (in-degree 2) a gene takes exactly one of the two incoming edges, so
-    the full topology space is the Cartesian product of those choices
-    across all reticulation nodes, weighted by 'inher_weight'. Works on
-    any nx.DiGraph carrying 'inher_weight' on its reticulation edges,
-    e.g. phy.G directly or the output of phy.filter_nodes().
-    """
-    retic_nodes = [n for n in G if G.in_degree(n) == 2]
+        unary = [n for n in tree if tree.out_degree(n) == 1 and tree.in_degree(n) <= 1]
+        if not unary:
+            return tree
+        node = unary[0]
+        succ = next(tree.successors(node))
+        if tree.in_degree(node) == 0:
+            tree.remove_node(node)
+            print("removed",node)
+            continue
+        pred = next(tree.predecessors(node))
+        tree.remove_node(node)
+        print("removed",node)
+        tree.add_edge(pred, succ, weight=1)
+
+
+def enumerate_gene_trees(
+    G: nx.DiGraph,
+    n_samples: int | str = "all",
+    rng: random.Random | None = None,
+    dedupe: bool = False,
+) -> list[tuple[nx.DiGraph, float]]:
+    retic_nodes = [n for n in G if G.in_degree(n) > 1]
     choices = [list(G.in_edges(n, data='inher_weight')) for n in retic_nodes]
+    all_edges = {(u, v) for edges in choices for u, v, _ in edges}
+
+    if n_samples == "all":
+        combos = itertools.product(*choices)
+    else:
+        rng = rng or random
+        combos = (
+            tuple(rng.choices(edges, weights=[w for _, _, w in edges])[0] for edges in choices)
+            for _ in range(n_samples)
+        )
 
     results = []
-    for combo in itertools.product(*choices):
+    seen = set()
+    for combo in combos:
         chosen = {(u, v) for u, v, _ in combo}
-        dropped = {(u, v) for edges in choices for u, v, _ in edges} - chosen
+        dropped = all_edges - chosen
         weight = 1.0
         for _, _, w in combo:
             weight *= w
         kept = [(u, v) for u, v in G.edges() if (u, v) not in dropped]
-        tree = nx.DiGraph()
-        tree.add_edges_from(kept)
+        tree = G.edge_subgraph(kept).copy()
+        tree = _suppress_unary_nodes(tree)
+        if dedupe:
+            key = frozenset(tree.edges())
+            if key in seen:
+                continue
+            seen.add(key)
         results.append((tree, weight))
     return results
 

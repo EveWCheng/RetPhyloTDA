@@ -1,5 +1,4 @@
 import os
-import json
 import shutil
 import numpy as np
 from network_lab_tda.data_prep.Data_Prep import Data_Prep
@@ -49,7 +48,7 @@ def _select_thresholds(cycle_log, index_to_name, min_cycle_length):
     return thresholds, qualifying_cycle_keys
 
 
-def find_cycles(G, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length"):
+def find_cycles(G, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length",vis=False):
     output_path = os.path.join(HERE, os.pardir, "Outputs", "proc_phylo_outputs", sim_label)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -68,33 +67,29 @@ def find_cycles(G, populated_header_fn="populated_headers.txt", which_nodes="all
     if not os.path.exists(cycle_output_path):
         os.makedirs(cycle_output_path)
     hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=os.path.join(cycle_output_path,"rip.json"))
-    simplices, appears_at = hc.rips_filtration()
-    hc.compute_harmonics(simplices, appears_at)
-    hc.run_harmonics()
-    hc.save_log()
+    hc.run_harmonics(save=False)
+    cycle_log = hc.log
 
-    with open(hc.log_path, "r") as f:
-        cycle_log = json.load(f)
-
-    thresholds, qualifying_cycle_keys = _select_thresholds(cycle_log, pe.index_to_name, min_cycle_length)
-#
-    os.makedirs(vis_output_path)
-    plotter = tda_visual_from_jason(
-        jason_path=hc.log_path,
-        thresholds=thresholds,
-        index_to_name=pe.index_to_name,
-        log_path=vis_output_path,
-        cycle_qualify=lambda drawn_edges: _cycle_key(
-            [(simplex, weight) for simplex, weight in drawn_edges if abs(weight) > WEIGHT_ZERO_TOL]
-        ) in qualifying_cycle_keys,
-    )
-    plotter.cycle_plot()
-
-    for cycle in cycle_log["harmonic_cycles"]:
-        edges = cycle["edges"]
-        for edge in edges:
-            if abs(edge["weight"]) <= WEIGHT_ZERO_TOL:
-                continue
-            u, v = edge["simplex"]
-            label_u = pe.index_to_name[u]
-            label_v = pe.index_to_name[v]
+    if vis:
+        thresholds, qualifying_cycle_keys = _select_thresholds(cycle_log, pe.index_to_name, min_cycle_length)
+    #
+        os.makedirs(vis_output_path)
+        plotter = tda_visual_from_jason(
+            data=cycle_log,
+            thresholds=thresholds,
+            index_to_name=pe.index_to_name,
+            log_path=vis_output_path,
+            cycle_qualify=lambda drawn_edges: _cycle_key(
+                [(simplex, weight) for simplex, weight in drawn_edges if abs(weight) > WEIGHT_ZERO_TOL]
+            ) in qualifying_cycle_keys,
+        )
+        plotter.cycle_plot()
+    
+        for cycle in cycle_log["harmonic_cycles"]:
+            edges = cycle["edges"]
+            for edge in edges:
+                if abs(edge["weight"]) <= WEIGHT_ZERO_TOL:
+                    continue
+                u, v = edge["simplex"]
+                label_u = pe.index_to_name[u]
+                label_v = pe.index_to_name[v]
