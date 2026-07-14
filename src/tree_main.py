@@ -1,6 +1,5 @@
 import os
 import shutil
-from typing import Optional, Callable
 import numpy as np
 import networkx as nx
 from tqdm.std import TqdmDefaultWriteLock
@@ -12,7 +11,6 @@ TqdmDefaultWriteLock.mp_lock = None
 
 from sim_bdh import SimState, SimParams, _sim_one, enumerate_gene_trees
 from export import export_csv
-from find_cycles import find_cycles
 from network_lab_tda.tree_edit.tree_addition import networkx_to_tree_json, merge_trees, visualize
 from network_lab_tda.tda_analysis import harmonic_cycle
 from network_lab_tda.tda_visualisation.tda_visual import tda_visual_from_jason
@@ -30,7 +28,7 @@ MRCA     = True
 LAMBDA   = 0.5
 MU       = 0.1
 NU       = 0.2
-HYBPROPS = [0, 0, 1]   # [lineage generating, degenerative, neutral]
+HYBPROPS = [1, 0,0]   # [lineage generating, degenerative, neutral]
 STOPPING_NUM_LEAVES = 8
 MIN_CYCLE_LENGTH = 4
 Ngene = 2
@@ -47,7 +45,7 @@ def process_gene_trees(phy, which_nodes: str = "no_hyb_nodes"):
 #    print(filtered_G.nodes(data="is_hyb_node"))
     os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
     visualize(filtered_G, output=os.path.join(TREE_GROUP_OUTPUTS_DIR, "filtered_G.html"))
-    enumerated_trees = enumerate_gene_trees(filtered_G,n_samples=1000)
+    enumerated_trees = enumerate_gene_trees(filtered_G,n_samples="all")
     os.makedirs(TREE_GROUPS_DIR, exist_ok=True)
     for entry in os.scandir(TREE_GROUPS_DIR):
         if entry.is_file():

@@ -66,11 +66,9 @@ class PhyloNetwork:
         return self.G.edge_subgraph(edges)
 
     def filter_nodes(self, which_nodes: str = "no_hyb_nodes") -> nx.DiGraph:
-        """Induced subgraph for the requested node subset.
-
+        """
         all_nodes     -- every node except extinct tips (label starts with 'ext')
         no_hyb_nodes  -- all_nodes, with internal hybrid-junction nodes collapsed
-                         out so hyb_leaf tips connect directly to primary/secondary
         """
         keep = [n for n, label in self.G.nodes(data="label") if not label.startswith("ext")]
         G = self.G.subgraph(keep).copy()
@@ -184,16 +182,6 @@ class SimState:
         return total
 
     def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None):
-        """Shared opening for all hybridization events.
-
-        Returns (primary, secondary, primary_inher, secondary_inher, d12,
-        primary_genes, secondary_genes, parent_of_primary).
-        Seals both parent edges and removes them from active leaves.
-        parent_of_primary is primary's pre-existing ancestor, needed by
-        hyb_degenerative/hyb_neutral to retroactively tag that edge's
-        inher_weight once it becomes one of two incoming edges at a
-        reticulation node.
-        """
         d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2)
 
         primary   = sp1 if (1 - inher) > 0.5 else sp2
@@ -392,10 +380,6 @@ def _finalize_pendant_edges(state: SimState):
 
 
 def _collapse_hyb_nodes(G: nx.DiGraph) -> nx.DiGraph:
-    """Bypass internal hybrid-junction nodes (is_hyb_node=True).
-
-    Each such node has two predecessors (primary, secondary) and one successor (the hyb_leaf). Removing it naively would disconnect the hyb_leaf from its parents, so instead we reconnect each predecessor directly to each successor, summing length/time_length across the two collapsed edges and keeping the predecessor edge's edge_type/genes/inher_weight (which distinguish the primary vs. secondary side).
-    """
     G = G.copy()
     hyb_nodes = [n for n, flag in G.nodes(data="is_hyb_node") if flag]
     for node in hyb_nodes:
@@ -418,8 +402,7 @@ def _suppress_unary_nodes(tree: nx.DiGraph) -> nx.DiGraph:
     while True:
         dead_ends = [n for n in tree if tree.out_degree(n) == 0 and not tree.nodes[n].get('is_leaf', False)]
         if dead_ends:
-            tree.remove_node(dead_ends[0])
-            print("removed", dead_ends[0])
+            tree.remove_nodes_from(dead_ends)
             continue
 
         unary = [n for n in tree if tree.out_degree(n) == 1 and tree.in_degree(n) <= 1]
@@ -429,12 +412,10 @@ def _suppress_unary_nodes(tree: nx.DiGraph) -> nx.DiGraph:
         succ = next(tree.successors(node))
         if tree.in_degree(node) == 0:
             tree.remove_node(node)
-            print("removed",node)
-            continue
-        pred = next(tree.predecessors(node))
-        tree.remove_node(node)
-        print("removed",node)
-        tree.add_edge(pred, succ, weight=1)
+        else:
+            pred = next(tree.predecessors(node))
+            tree.remove_node(node)
+            tree.add_edge(pred, succ, weight=1)
 
 
 def enumerate_gene_trees(
@@ -444,6 +425,10 @@ def enumerate_gene_trees(
     dedupe: bool = False,
 ) -> list[tuple[nx.DiGraph, float]]:
     retic_nodes = [n for n in G if G.in_degree(n) > 1]
+    print([G.in_degree(n) for n in retic_nodes])
+    print(f"{len(retic_nodes)} of choices are detected")
+    n_events = sum(1 for n, flag in G.nodes(data='is_hyb_leaf') if flag)
+    print(f"should be {n_events} of choices")
     choices = [list(G.in_edges(n, data='inher_weight')) for n in retic_nodes]
     all_edges = {(u, v) for edges in choices for u, v, _ in edges}
 
@@ -480,10 +465,10 @@ def _assign_labels(G: nx.DiGraph):
     for n, attrs in G.nodes(data=True):
         if attrs.get('extinct'):
             label = f"ext{n}"
-        elif attrs['is_leaf']:
-            label = f"sp{n}"  # checked before is_hyb_leaf: an extant hybrid-leaf tip must read "sp", not "hyb"
         elif attrs.get('is_hyb_leaf'):
             label = f"hyb{n}"
+        elif attrs['is_leaf']:
+            label = f"sp{n}"
         else:
             label = f"-{n}"
         G.nodes[n]['label'] = label
