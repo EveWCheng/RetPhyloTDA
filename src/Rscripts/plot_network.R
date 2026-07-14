@@ -1,21 +1,28 @@
 .libPaths("~/R/library")
 library(ape)
 library(SiPhyNetwork)
+library(yaml)
 
-# ── Parameters ────────────────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
+# First CLI arg is the path to a config yaml (input_dir / output_dir). Any
+# further args are sim indices to restrict the run to; if none are given,
+# every simN_nodes.csv/simN_edges.csv pair found in input_dir is plotted.
+# Usage: Rscript plot_network.R <config.yaml> [sim_indices...]
 
-OUT_DIR  <- "../../Outputs/phylo_outputs"
-PLOT_DIR <- "../../Outputs/phylo_plots"
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) < 1) {
+  stop("Usage: Rscript plot_network.R <config.yaml> [sim_indices...]")
+}
+config   <- yaml::read_yaml(args[1])
+IN_DIR   <- config$input_dir
+PLOT_DIR <- config$output_dir
 if (!dir.exists(PLOT_DIR)) dir.create(PLOT_DIR, recursive = TRUE)
 
-# By default, plot every simN_nodes.csv/simN_edges.csv pair found in OUT_DIR.
-# Pass one or more sim indices on the command line (e.g. `Rscript plot_network.R 0 12`)
-# to restrict the run to those simulations only.
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) > 0) {
-  sim_indices <- as.integer(args)
+sim_args <- args[-1]
+if (length(sim_args) > 0) {
+  sim_indices <- as.integer(sim_args)
 } else {
-  node_files  <- list.files(OUT_DIR, pattern = "^sim[0-9]+_nodes\\.csv$")
+  node_files  <- list.files(IN_DIR, pattern = "^sim[0-9]+_nodes\\.csv$")
   sim_indices <- sort(as.integer(gsub("sim([0-9]+)_nodes\\.csv", "\\1", node_files)))
 }
 
@@ -71,8 +78,8 @@ build_phy <- function(nodes, edges) {
 # ── Read one sim's CSVs, plot it, and write the PDF ───────────────────────────
 
 plot_sim <- function(sim_index) {
-  nodes_file <- file.path(OUT_DIR, paste0("sim", sim_index, "_nodes.csv"))
-  edges_file <- file.path(OUT_DIR, paste0("sim", sim_index, "_edges.csv"))
+  nodes_file <- file.path(IN_DIR, paste0("sim", sim_index, "_nodes.csv"))
+  edges_file <- file.path(IN_DIR, paste0("sim", sim_index, "_edges.csv"))
 
   nodes <- read.csv(nodes_file, stringsAsFactors = FALSE)
   edges <- read.csv(edges_file, stringsAsFactors = FALSE)

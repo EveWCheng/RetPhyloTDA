@@ -47,7 +47,7 @@ def process_gene_trees(phy, which_nodes: str = "no_hyb_nodes"):
 #    print(filtered_G.nodes(data="is_hyb_node"))
     os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
     visualize(filtered_G, output=os.path.join(TREE_GROUP_OUTPUTS_DIR, "filtered_G.html"))
-    enumerated_trees = enumerate_gene_trees(filtered_G,n_samples=4)
+    enumerated_trees = enumerate_gene_trees(filtered_G,n_samples=1000)
     os.makedirs(TREE_GROUPS_DIR, exist_ok=True)
     for entry in os.scandir(TREE_GROUPS_DIR):
         if entry.is_file():
@@ -67,7 +67,7 @@ def process_gene_trees(phy, which_nodes: str = "no_hyb_nodes"):
     hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=os.path.join(TREE_GROUP_OUTPUTS_DIR, "rip.json"))
     hc.run_harmonics()
 
-    vis = tda_visual_from_jason(data=hc.log, log_path=os.path.join(TREE_GROUP_OUTPUTS_DIR, "harmonic_cycle_plots"),index_to_name=index_to_name)
+    vis = tda_visual_from_jason(data=hc.log, log_path=os.path.join(TREE_GROUP_OUTPUTS_DIR, "harmonic_cycle_plots"),index_to_name=index_to_name, plt_together=True, plt_sep=True, thresholds=[1])
     vis.cycle_plot()
 
     return hc
