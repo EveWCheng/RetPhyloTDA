@@ -12,7 +12,7 @@ TqdmDefaultWriteLock.mp_lock = None
 
 from sim_bdh import SimState, SimParams, _sim_one
 from export import export_csv
-from find_cycles import find_cycles
+from find_cycles import CycleFinder
 import cProfile, pstats
 from pstats import SortKey
 
@@ -97,7 +97,7 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
 
         export_csv(phy, OUT_DIR, prefix=f"sim{i}_")
         filtered_G = phy.filter_nodes(which_nodes=which_nodes)
-        find_cycles(filtered_G, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH)
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=os.path.join(HERE, os.pardir, "Outputs"), which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH).find_cycles()
 
         if gene_index is not None:
             gtree = phy.gene_tree(gene_index)

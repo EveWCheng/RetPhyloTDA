@@ -1,95 +1,133 @@
 import os
 import shutil
-import numpy as np
+import warnings
+import networkx as nx
 from network_lab_tda.data_prep.Data_Prep import Data_Prep
 from network_lab_tda.data_prep.Populate_Edge import Populate_Edge
 from network_lab_tda.tda_analysis import harmonic_cycle
 from network_lab_tda.tda_visualisation.tda_visual import tda_visual_from_jason
 
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+class CycleFinder:
+    WEIGHT_ZERO_TOL = 0.0
 
-WEIGHT_ZERO_TOL = 0.01
-
-
-def _marker_nodes(cycle, index_to_name):
-    names = set()
-    for edge in cycle["edges"]:
-        if abs(edge["weight"]) <= WEIGHT_ZERO_TOL:
-            continue
-        for idx in edge["simplex"]:
-            name = index_to_name.get(idx)
-            if isinstance(name, str) and ("hyb" in name or "sp" in name):
-                names.add(name)
-    return names
-
-
-def _cycle_key(drawn_edges):
-    return tuple(sorted((tuple(simplex), weight) for simplex, weight in drawn_edges))
+    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=False, use_data_prep=True, thresholds=None):
+        self.G = G
+        self.populated_header_fn = populated_header_fn
+        self.which_nodes = which_nodes
+        self.sim_label = sim_label
+        self.min_cycle_length = min_cycle_length
+        self.weight_attr = weight_attr
+        self.vis = vis
+        self.use_data_prep = use_data_prep
+        self.threshold_mode = threshold_mode
+        self.cycle_qualify_mode = cycle_qualify_mode
+        self.thresholds = thresholds if thresholds is not None else []
+        self.qualifying_cycle_keys = []
+        self.seen_markers = set()
 
 
-def _select_thresholds(cycle_log, index_to_name, min_cycle_length):
-    """Also returns the edge-keys of cycles that introduce a marker node (hyb/sp)
-    not seen in any earlier-born cycle, so a marker can only "count" for the
-    first cycle it appears in."""
-    thresholds = []
-    qualifying_cycle_keys = set()
-    seen_markers = set()
-    for c in cycle_log["harmonic_cycles"]:
-        edges = [(edge["simplex"], edge["weight"]) for edge in c["edges"] if abs(edge["weight"]) > WEIGHT_ZERO_TOL]
-        if len(edges) <= min_cycle_length:
-            continue
-        marker_nodes = _marker_nodes(c, index_to_name)
-        new_markers = marker_nodes - seen_markers
-        if new_markers:
-            thresholds.append(c["birth"])
-            qualifying_cycle_keys.add(_cycle_key(edges))
-        seen_markers |= marker_nodes
-    return thresholds, qualifying_cycle_keys
+        self.output_path = os.path.join(output_dir, "proc_phylo_outputs", sim_label)
+        self.cycle_output_path = os.path.join(output_dir, "cycle_outputs", sim_label)
+        vis_suffix = "all_nodes" if which_nodes == "all_nodes" else "leaf_nodes"
+        self.vis_output_path = os.path.join(self.cycle_output_path, vis_suffix)
 
+    def _prepare_dirs(self):
+        if not os.path.exists(self.output_path):
+            os.makedirs(self.output_path)
+        if os.path.exists(self.vis_output_path):
+            shutil.rmtree(self.vis_output_path)
+        if not os.path.exists(self.cycle_output_path):
+            os.makedirs(self.cycle_output_path)
 
-def find_cycles(G, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length",vis=False):
-    output_path = os.path.join(HERE, os.pardir, "Outputs", "proc_phylo_outputs", sim_label)
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+    def _marker_nodes(self, cycle):
+        names = set()
+        for edge in cycle["edges"]:
+            if abs(edge["weight"]) <= self.WEIGHT_ZERO_TOL:
+                continue
+            for idx in edge["simplex"]:
+                name = self.index_to_name.get(idx)
+                if isinstance(name, str) and ("hyb" in name or "sp" in name):
+                    names.add(name)
+        return names
 
-    cycle_output_path = os.path.join(HERE, os.pardir, "Outputs", "cycle_outputs", sim_label)
-    vis_suffix = "all_nodes" if which_nodes == "all_nodes" else "leaf_nodes"
-    vis_output_path = os.path.join(cycle_output_path, vis_suffix)
-    if os.path.exists(vis_output_path):
-        shutil.rmtree(vis_output_path)
+    def _select_threshold_cyclelength(self,cycle):
+            edges = [(edge["simplex"], edge["weight"]) for edge in cycle["edges"] if abs(edge["weight"]) > self.WEIGHT_ZERO_TOL]
+            return len(edges) > self.min_cycle_length
 
-    dp = Data_Prep(G=G, log_path=output_path, headers=False, weight_attr=weight_attr)
-    pe = Populate_Edge(G=dp.G, log_path=output_path, headers=False, populated_header_fn=populated_header_fn,max_node_per_edge=1, weight_attr=weight_attr)
-#
-    dist_matrix = pe.populate_edges()
+    def _select_threshold_marker(self,cycle):
+        marker_nodes = self._marker_nodes(cycle)
+        new_markers = marker_nodes - self.seen_markers
+        self.seen_markers |= marker_nodes
+        return len(new_markers) != 0
 
-    if not os.path.exists(cycle_output_path):
-        os.makedirs(cycle_output_path)
-    hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=os.path.join(cycle_output_path,"rip.json"))
-    hc.run_harmonics(save=False)
-    cycle_log = hc.log
+    def _select_threshold_fixed(self,cycle):
+        return any(cycle["birth"] <= t + 1e-5 for t in self.thresholds)
 
-    if vis:
-        thresholds, qualifying_cycle_keys = _select_thresholds(cycle_log, pe.index_to_name, min_cycle_length)
-    #
-        os.makedirs(vis_output_path)
+    def generate_threshold_cycle_keys(self):
+       for cycle in self.cycle_log["harmonic_cycles"]:
+           if self._resolve_threshold_selection(cycle):
+               if "fixed" not in self.threshold_mode:
+                   self.thresholds.append(cycle["birth"])
+               if self._resolve_cycle_qualify(cycle):
+                   self.qualifying_cycle_keys.append(cycle)
+
+    def _resolve_threshold_selection(self,cycle):
+        for mode in self.threshold_mode:
+            if not getattr(self, f"_select_threshold_{mode}")(cycle):
+                return False
+        return True
+
+    def qualifying_cycle_marker(self,cycle):
+        if "marker" not in self.threshold_mode:
+            raise ValueError("marker cycle_qualify used but marker is not in threshold_mode, so it was not properly run")
+        return True
+
+    def qualifying_cycle_crossover(self,cycle):
+        nodes = {idx for edge in cycle["edges"] for idx in edge["simplex"]}
+        node_sources = [self.G.nodes[self.index_to_node[idx]].get("sources", set()) for idx in nodes]
+        for i in range(len(node_sources)):
+            for j in range(i + 1, len(node_sources)):
+                if not (node_sources[i] & node_sources[j]):
+                    return False
+        return True
+
+    def _resolve_cycle_qualify(self,cycle):
+        for mode in self.cycle_qualify_mode:
+            if not getattr(self, f"qualifying_cycle_{mode}")(cycle):
+                return False
+        return True
+
+    def _visualize(self):
+        self.generate_threshold_cycle_keys()
+        os.makedirs(self.vis_output_path)
         plotter = tda_visual_from_jason(
-            data=cycle_log,
-            thresholds=thresholds,
-            index_to_name=pe.index_to_name,
-            log_path=vis_output_path,
-            cycle_qualify=lambda drawn_edges: _cycle_key(
-                [(simplex, weight) for simplex, weight in drawn_edges if abs(weight) > WEIGHT_ZERO_TOL]
-            ) in qualifying_cycle_keys,
+            data=self.cycle_log,
+            thresholds=self.thresholds,
+            index_to_name=self.index_to_name,
+            log_path=self.vis_output_path,
+            cycle_qualify=lambda cycle: cycle in self.qualifying_cycle_keys,
         )
         plotter.cycle_plot()
-    
-        for cycle in cycle_log["harmonic_cycles"]:
-            edges = cycle["edges"]
-            for edge in edges:
-                if abs(edge["weight"]) <= WEIGHT_ZERO_TOL:
-                    continue
-                u, v = edge["simplex"]
-                label_u = pe.index_to_name[u]
-                label_v = pe.index_to_name[v]
+
+    def find_cycles(self):
+        self._prepare_dirs()
+
+        if self.use_data_prep:
+            dp = Data_Prep(G=self.G, log_path=self.output_path, headers=False, weight_attr=self.weight_attr)
+            pe = Populate_Edge(G=dp.G, log_path=self.output_path, headers=False, populated_header_fn=self.populated_header_fn, max_node_per_edge=1, weight_attr=self.weight_attr)
+            dist_matrix = pe.populate_edges()
+            self.index_to_name = pe.index_to_name
+        else:
+            dist_matrix = nx.floyd_warshall_numpy(self.G)
+            self.index_to_name = dict(self.G.nodes(data="label"))
+        self.index_to_node = dict(enumerate(self.G.nodes()))
+
+        hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=os.path.join(self.cycle_output_path, "rip.json"))
+        hc.run_harmonics(save=False)
+        self.cycle_log = hc.log
+
+        if self.vis:
+            self._visualize()
+
+        return self.cycle_log
