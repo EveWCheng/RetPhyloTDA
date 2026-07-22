@@ -192,7 +192,7 @@ sim <- run_simulation(
   seed          = 50
 )
 
-OUT_DIR <- "../../Outputs/phylo_outputs"
+OUT_DIR <- "../../outputs/phylo_outputs"
 if (!dir.exists(OUT_DIR)) dir.create(OUT_DIR, recursive = TRUE)
 
 print_summary(sim, AGE)

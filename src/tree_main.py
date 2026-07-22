@@ -14,7 +14,7 @@ from network_lab_tda.tree_edit.tree_addition import networkx_to_tree_json, merge
 from find_cycles import CycleFinder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TREE_GROUP_OUTPUTS_DIR = os.path.join(HERE, os.pardir, "Outputs", "tree_group_outputs")
+TREE_GROUP_OUTPUTS_DIR = os.path.join(HERE, os.pardir, "outputs", "tree_group_outputs")
 TREE_GROUPS_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "tree_groups")
 MERGED_TREE_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "merged_tree")
 PHYLO_CSV_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "phylo_csv")
@@ -40,14 +40,20 @@ MIN_CYCLE_LENGTH = 4
 Ngene = 2
 # trait evolution model (none used)
 TRAIT_MODEL = None
-# number of gene-tree samples to enumerate
-N_SAMPLES = 2
+# number of gene-tree samples to enumerate, "all" or an integer
+N_SAMPLES = "all"
 # fixed thresholds to plot cycles at; set to None to derive thresholds dynamically via THRESHOLD_MODE instead
 THRESHOLDS = [1]
 # threshold-selection strategies CycleFinder runs per cycle
+# available options: "cyclelength", "marker", "fixed"; [] means every cycle passes (no filtering)
 THRESHOLD_MODE = ["fixed"]
 # cycle-qualification strategies CycleFinder runs per cycle
-CYCLE_QUALIFY_MODE = ["crossover"]
+# available options: "marker", "crossover"; [] means every selected cycle qualifies (no filtering)
+CYCLE_QUALIFY_MODE = []
+# list of units print_most_shared_units reports on, one output file per entry
+# available options: "edge", "node"
+SHARING_UNIT = ["edge", "node"]
+
 
 # draws hybrid inheritance probability
 hyb_inher_fxn = lambda: np.random.uniform(0, 1)
@@ -70,9 +76,13 @@ def process_gene_trees(phy, which_nodes: str = "no_hyb_nodes"):
 
     os.makedirs(MERGED_TREE_DIR, exist_ok=True)
     merged_G = merge_trees(input_dir=TREE_GROUPS_DIR, output_dir=MERGED_TREE_DIR)
+    return merged_G
 
-    cf = CycleFinder(merged_G, threshold_mode=THRESHOLD_MODE, cycle_qualify_mode=CYCLE_QUALIFY_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, thresholds=THRESHOLDS, min_cycle_length=MIN_CYCLE_LENGTH, use_data_prep=False, vis=True)
-    return cf.find_cycles()
+
+def find_cycles_in_merged_tree(merged_G):
+    cf = CycleFinder(merged_G, threshold_mode=THRESHOLD_MODE, cycle_qualify_mode=CYCLE_QUALIFY_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, thresholds=THRESHOLDS, min_cycle_length=MIN_CYCLE_LENGTH, use_data_prep=False, vis=True, sharing_unit=SHARING_UNIT)
+    cf.find_cycles()
+    cf.print_most_shared_units()
 
 
 def main(seed=43, which_nodes: str = "no_hyb_nodes"):
@@ -88,7 +98,8 @@ def main(seed=43, which_nodes: str = "no_hyb_nodes"):
             shutil.rmtree(TREE_GROUP_OUTPUTS_DIR)
         os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
         export_csv(phy, PHYLO_CSV_DIR, prefix="sim0_")
-        process_gene_trees(phy, which_nodes=which_nodes)
+        merged_G = process_gene_trees(phy, which_nodes=which_nodes)
+        find_cycles_in_merged_tree(merged_G)
     else:
         print("Tree died")
 

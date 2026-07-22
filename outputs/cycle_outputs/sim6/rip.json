@@ -1,0 +1,20 @@
+{
+  "harmonic_cycles": [],
+  "simplicies": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "appears_at": [
+    0.0,
+    0.0,
+    Infinity
+  ]
+}

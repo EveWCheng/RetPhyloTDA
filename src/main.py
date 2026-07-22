@@ -17,7 +17,7 @@ import cProfile, pstats
 from pstats import SortKey
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(HERE, os.pardir, "Outputs", "phylo_outputs")
+OUT_DIR = os.path.join(HERE, os.pardir, "outputs", "phylo_outputs")
 
 
 def sim_bdh_age(age: float, numbsim: int,
@@ -97,7 +97,7 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
 
         export_csv(phy, OUT_DIR, prefix=f"sim{i}_")
         filtered_G = phy.filter_nodes(which_nodes=which_nodes)
-        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=os.path.join(HERE, os.pardir, "Outputs"), which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH).find_cycles()
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=os.path.join(HERE, os.pardir, "outputs"), which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH).find_cycles()
 
         if gene_index is not None:
             gtree = phy.gene_tree(gene_index)

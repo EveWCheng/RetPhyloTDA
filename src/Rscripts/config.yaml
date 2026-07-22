@@ -1,2 +1,2 @@
-input_dir: "../../Outputs/tree_group_outputs/phylo_csv"
-output_dir: "../../Outputs/tree_group_outputs/phylo_plots"
+input_dir: "../../outputs/tree_group_outputs/phylo_csv"
+output_dir: "../../outputs/tree_group_outputs/phylo_plots"
