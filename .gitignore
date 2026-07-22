@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Outputs
-Outputs/
+outputs/
 
 # Local libraries
 src/lib/
