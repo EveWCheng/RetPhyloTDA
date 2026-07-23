@@ -12,6 +12,7 @@ from sim_bdh import SimState, SimParams, _sim_one, enumerate_gene_trees
 from export import export_csv
 from network_lab_tda.tree_edit.tree_addition import networkx_to_tree_json, merge_trees, visualize
 from find_cycles import CycleFinder
+from shared_node_utils import filter_shared_nodes_by_spread
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE_GROUP_OUTPUTS_DIR = os.path.join(HERE, os.pardir, "outputs", "tree_group_outputs")
@@ -28,9 +29,9 @@ MRCA     = True
 # speciation rate
 LAMBDA   = 0.5
 # extinction rate
-MU       = 0.1
+MU       = 0.08
 # hybridization rate
-NU       = 0.01
+NU       = 0.02
 HYBPROPS = [1, 0,0]   # [lineage generating, degenerative, neutral]
 # stop simulation once tree reaches this many leaves
 STOPPING_NUM_LEAVES = 30
@@ -53,6 +54,9 @@ CYCLE_QUALIFY_MODE = []
 # list of units print_most_shared_units reports on, one output file per entry
 # available options: "edge", "node"
 SHARING_UNIT = ["edge", "node"]
+# shared_nodes_all.txt lines whose max_tip_spread (hop count on the reticulation-free
+# tree backbone) is smaller than this are copied into shared_nodes_all_filtered.txt
+MAX_SHARED_NODE_SPREAD = 8
 
 
 # draws hybrid inheritance probability
@@ -83,6 +87,7 @@ def find_cycles_in_merged_tree(merged_G):
     cf = CycleFinder(merged_G, threshold_mode=THRESHOLD_MODE, cycle_qualify_mode=CYCLE_QUALIFY_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, thresholds=THRESHOLDS, min_cycle_length=MIN_CYCLE_LENGTH, use_data_prep=False, vis=True, sharing_unit=SHARING_UNIT)
     cf.find_cycles()
     cf.print_most_shared_units()
+    return cf.cycle_output_path
 
 
 def main(seed=43, which_nodes: str = "no_hyb_nodes"):
@@ -99,7 +104,14 @@ def main(seed=43, which_nodes: str = "no_hyb_nodes"):
         os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
         export_csv(phy, PHYLO_CSV_DIR, prefix="sim0_")
         merged_G = process_gene_trees(phy, which_nodes=which_nodes)
-        find_cycles_in_merged_tree(merged_G)
+        print("the gene trees have been merged")
+        cycle_output_path = find_cycles_in_merged_tree(merged_G)
+        filter_shared_nodes_by_spread(
+            phy.G,
+            os.path.join(cycle_output_path, "shared_nodes_all.txt"),
+            os.path.join(cycle_output_path, "shared_nodes_all_filtered.txt"),
+            MAX_SHARED_NODE_SPREAD,
+        )
     else:
         print("Tree died")
 
