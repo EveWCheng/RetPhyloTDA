@@ -34,15 +34,20 @@ MU       = 0.08
 NU       = 0.02
 HYBPROPS = [1, 0,0]   # [lineage generating, degenerative, neutral]
 # stop simulation once tree reaches this many leaves
-STOPPING_NUM_LEAVES = 30
+STOPPING_NUM_LEAVES = 40
 # minimum cycle length filter for TDA cycle detection
 MIN_CYCLE_LENGTH = 4
+# cap on how many qualifying cycles get rendered as HTML; None means render all of them
+MAX_PLOT_CYCLES = 30
 # number of gene trees to simulate
 Ngene = 2
 # trait evolution model (none used)
 TRAIT_MODEL = None
-# number of gene-tree samples to enumerate, "all" or an integer
-N_SAMPLES = "all"
+# number of gene-tree samples to enumerate, "all" or an integer -- "all" enumerates
+# the full cartesian product of reticulate-node choices (2^(number of reticulation
+# events)), which grows exponentially with tree size and can blow up long before
+# STOPPING_NUM_LEAVES gets large
+N_SAMPLES = 500
 # fixed thresholds to plot cycles at; set to None to derive thresholds dynamically via THRESHOLD_MODE instead
 THRESHOLDS = [1]
 # threshold-selection strategies CycleFinder runs per cycle
@@ -54,9 +59,12 @@ CYCLE_QUALIFY_MODE = []
 # list of units print_most_shared_units reports on, one output file per entry
 # available options: "edge", "node"
 SHARING_UNIT = ["edge", "node"]
+# if True, sharing_edge_frequency/sharing_nodes_frequency skip edges G marks as "true_edge"
+# (edges present in every merged input tree, per tree_addition.add_G_edge)
+DELETE_TRUE_EDGES = False
 # shared_nodes_all.txt lines whose max_tip_spread (hop count on the reticulation-free
 # tree backbone) is smaller than this are copied into shared_nodes_all_filtered.txt
-MAX_SHARED_NODE_SPREAD = 8
+MAX_SHARED_NODE_SPREAD = 3
 
 
 # draws hybrid inheritance probability
@@ -80,11 +88,11 @@ def process_gene_trees(phy, which_nodes: str = "no_hyb_nodes"):
 
     os.makedirs(MERGED_TREE_DIR, exist_ok=True)
     merged_G = merge_trees(input_dir=TREE_GROUPS_DIR, output_dir=MERGED_TREE_DIR)
-    return merged_G
+    return merged_G,enumerated_trees 
 
 
 def find_cycles_in_merged_tree(merged_G):
-    cf = CycleFinder(merged_G, threshold_mode=THRESHOLD_MODE, cycle_qualify_mode=CYCLE_QUALIFY_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, thresholds=THRESHOLDS, min_cycle_length=MIN_CYCLE_LENGTH, use_data_prep=False, vis=True, sharing_unit=SHARING_UNIT)
+    cf = CycleFinder(merged_G, threshold_mode=THRESHOLD_MODE, cycle_qualify_mode=CYCLE_QUALIFY_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, thresholds=THRESHOLDS, min_cycle_length=MIN_CYCLE_LENGTH, use_data_prep=False, vis=True, sharing_unit=SHARING_UNIT, delete_true_edges=DELETE_TRUE_EDGES, max_plot_cycles=MAX_PLOT_CYCLES)
     cf.find_cycles()
     cf.print_most_shared_units()
     return cf.cycle_output_path
@@ -103,9 +111,10 @@ def main(seed=43, which_nodes: str = "no_hyb_nodes"):
             shutil.rmtree(TREE_GROUP_OUTPUTS_DIR)
         os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
         export_csv(phy, PHYLO_CSV_DIR, prefix="sim0_")
-        merged_G = process_gene_trees(phy, which_nodes=which_nodes)
+        merged_G,enumerated_trees  = process_gene_trees(phy, which_nodes=which_nodes)
         print("the gene trees have been merged")
         cycle_output_path = find_cycles_in_merged_tree(merged_G)
+
         filter_shared_nodes_by_spread(
             phy.G,
             os.path.join(cycle_output_path, "shared_nodes_all.txt"),

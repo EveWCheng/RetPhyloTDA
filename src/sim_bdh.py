@@ -425,14 +425,15 @@ def enumerate_gene_trees(
     dedupe: bool = False,
 ) -> list[tuple[nx.DiGraph, float]]:
     retic_nodes = [n for n in G if G.in_degree(n) > 1]
-    print([G.in_degree(n) for n in retic_nodes])
-    print(f"{len(retic_nodes)} of choices are detected")
-    n_events = sum(1 for n, flag in G.nodes(data='is_hyb_leaf') if flag)
-    print(f"should be {n_events} of choices")
     choices = [list(G.in_edges(n, data='inher_weight')) for n in retic_nodes]
     all_edges = {(u, v) for edges in choices for u, v, _ in edges}
 
-    if n_samples == "all":
+    total_combos = 1
+    for edges in choices:
+        total_combos *= len(edges)
+    n_samples = total_combos if n_samples == "all" else min(n_samples, total_combos)
+
+    if n_samples == total_combos:
         combos = itertools.product(*choices)
     else:
         rng = rng or random

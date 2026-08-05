@@ -6,14 +6,14 @@ from collections import Counter
 import networkx as nx
 from network_lab_tda.data_prep.Data_Prep import Data_Prep
 from network_lab_tda.data_prep.Populate_Edge import Populate_Edge
-from network_lab_tda.tda_analysis import harmonic_cycle
+from network_lab_tda.tda_analysis import harmonic_cycle, harmonic_cycle_snapshot
 from network_lab_tda.tda_visualisation.tda_visual import tda_visual_from_jason
 
 
 class CycleFinder:
     WEIGHT_ZERO_TOL = 0.0
 
-    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=False, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all"):
+    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=False, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None):
         self.G = G
         self.populated_header_fn = populated_header_fn
         # "all_nodes": keep every non-extinct node
@@ -40,6 +40,11 @@ class CycleFinder:
         self.sharing_unit = sharing_unit
         # "all": count over every detected cycle; "qualifying": count only over qualifying_cycle_keys
         self.sharing_which_cycles = sharing_which_cycles
+        # if True, sharing_edge_frequency/sharing_nodes_frequency skip edges that G marks as "true_edge"
+        # (edges present in every merged input tree, per tree_addition.add_G_edge)
+        self.delete_true_edges = delete_true_edges
+        # cap on how many qualifying cycles get rendered in _visualize; None means no cap
+        self.max_plot_cycles = max_plot_cycles
 
         self.output_path = os.path.join(output_dir, "proc_phylo_outputs", sim_label)
         self.cycle_output_path = os.path.join(output_dir, "cycle_outputs", sim_label)
@@ -116,13 +121,15 @@ class CycleFinder:
     def _visualize(self):
         self.generate_threshold_cycle_keys()
         os.makedirs(self.vis_output_path)
+        plotted_keys = self.qualifying_cycle_keys[:self.max_plot_cycles]
         plotter = tda_visual_from_jason(
             plt_sep = True,
+            plt_together = False,
             data=self.cycle_log,
             thresholds=self.thresholds,
             index_to_name=self.index_to_name,
             log_path=self.vis_output_path,
-            cycle_qualify=lambda cycle: cycle in self.qualifying_cycle_keys,
+            cycle_qualify=lambda cycle: cycle in plotted_keys,
         )
         plotter.cycle_plot()
 
@@ -139,8 +146,14 @@ class CycleFinder:
             self.index_to_name = dict(self.G.nodes(data="label"))
         self.index_to_node = dict(enumerate(self.G.nodes()))
 
-        hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=os.path.join(self.cycle_output_path, "rip.json"))
-        hc.run_harmonics(save=False)
+        log_path = os.path.join(self.cycle_output_path, "rip.json")
+
+        if self.thresholds and self.threshold_mode == ["fixed"]:
+            hc = harmonic_cycle_snapshot(dist_matrix, thresholds=self.thresholds, cycle_dim=1, sim_log=True, log_path=log_path)
+            hc.run_snapshot(save=False)
+        else:
+            hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=log_path)
+            hc.run_harmonics(save=False)
         self.cycle_log = hc.log
 
         if self.vis:
@@ -155,6 +168,18 @@ class CycleFinder:
             return self.qualifying_cycle_keys
         raise ValueError(f"Unknown sharing_which_cycles option: {self.sharing_which_cycles}")
 
+    def _is_true_G_edge(self, edge):
+        simplex = edge["simplex"]
+        if len(simplex) != 2:
+            return False
+        n1 = self.index_to_node[simplex[0]]
+        n2 = self.index_to_node[simplex[1]]
+        if self.G.has_edge(n1, n2):
+            return self.G.edges[n1, n2].get("label") == "true_edge"
+        if self.G.has_edge(n2, n1):
+            return self.G.edges[n2, n1].get("label") == "true_edge"
+        return False
+
     def _named_point(self, idx):
         name = self.index_to_name[idx]
         if isinstance(name, (list, tuple, set, frozenset)):
@@ -167,6 +192,8 @@ class CycleFinder:
             edge_keys = set()
             for edge in cycle["edges"]:
                 if abs(edge["weight"]) <= self.WEIGHT_ZERO_TOL:
+                    continue
+                if self.delete_true_edges and self._is_true_G_edge(edge):
                     continue
                 named_points = [self._named_point(idx) for idx in edge["simplex"]]
                 edge_keys.add(frozenset(named_points))
@@ -190,6 +217,8 @@ class CycleFinder:
             for edge in cycle["edges"]:
                 if abs(edge["weight"]) <= self.WEIGHT_ZERO_TOL:
                     continue
+                if self.delete_true_edges and self._is_true_G_edge(edge):
+                    continue
                 node_set_keys.add(self._flatten_simplex(edge["simplex"]))
             counts.update(node_set_keys)
 
@@ -210,7 +239,8 @@ class CycleFinder:
     def print_most_shared_units(self, top_n=None):
         for unit in self.sharing_unit:
             counts = self._frequency_for_unit(unit)
-            log_fn = f"shared_{unit}s_{self.sharing_which_cycles}.txt"
+            true_edges_suffix = "_no_true_edges" if self.delete_true_edges else ""
+            log_fn = f"shared_{unit}s_{self.sharing_which_cycles}{true_edges_suffix}.txt"
             log_path = os.path.join(self.cycle_output_path, log_fn)
             with open(log_path, "w") as f:
                 for key, count in counts.most_common(top_n):
