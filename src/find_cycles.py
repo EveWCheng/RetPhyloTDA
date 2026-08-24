@@ -13,9 +13,14 @@ from network_lab_tda.tda_visualisation.tda_visual import tda_visual_from_jason
 class CycleFinder:
     WEIGHT_ZERO_TOL = 0.0
 
-    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=False, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None):
+    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=True, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None, rips_threshold=float('inf')):
         self.G = G
         self.populated_header_fn = populated_header_fn
+        # cap on the Rips filtration passed to harmonic_cycle.run_harmonics() in the
+        # non-"fixed" threshold_mode branch; float('inf') (default) reproduces the old
+        # uncapped behavior (builds the complete simplex on every point). Callers can
+        # pass e.g. the longest single edge length in G to prune the complex.
+        self.rips_threshold = rips_threshold
         # "all_nodes": keep every non-extinct node
         # "no_hyb_nodes": all_nodes, with internal hybrid-junction nodes collapsed
         self.which_nodes = which_nodes
@@ -137,6 +142,7 @@ class CycleFinder:
         self._prepare_dirs()
 
         if self.use_data_prep:
+            print("preparing prep..")
             dp = Data_Prep(G=self.G, log_path=self.output_path, headers=False, weight_attr=self.weight_attr)
             pe = Populate_Edge(G=dp.G, log_path=self.output_path, headers=False, populated_header_fn=self.populated_header_fn, max_node_per_edge=1, weight_attr=self.weight_attr)
             dist_matrix = pe.populate_edges()
@@ -153,10 +159,11 @@ class CycleFinder:
             hc.run_snapshot(save=False)
         else:
             hc = harmonic_cycle(dist_matrix, cycle_dim=1, sim_log=True, log_path=log_path)
-            hc.run_harmonics(save=False)
+            hc.run_harmonics(threshold=self.rips_threshold, save=True)
         self.cycle_log = hc.log
 
         if self.vis:
+            print(self.index_to_name)
             self._visualize()
 
         return self.cycle_log

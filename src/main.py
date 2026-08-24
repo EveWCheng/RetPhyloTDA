@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import Optional, Callable
 
 import numpy as np
@@ -13,11 +14,10 @@ TqdmDefaultWriteLock.mp_lock = None
 from sim_bdh import SimState, SimParams, _sim_one
 from export import export_csv
 from find_cycles import CycleFinder
-import cProfile, pstats
-from pstats import SortKey
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(HERE, os.pardir, "outputs", "phylo_outputs")
+SIM_OUTPUTS_DIR = os.path.join(HERE, os.pardir, "outputs", "sim_phylo_outputs")
+PHYLO_CSV_DIR = os.path.join(SIM_OUTPUTS_DIR, "phylo_csv")
 
 
 def sim_bdh_age(age: float, numbsim: int,
@@ -26,7 +26,8 @@ def sim_bdh_age(age: float, numbsim: int,
                  mrca: bool = False,
                  hyb_rate_fxn: Optional[Callable] = None,
                  Ngene: int = 0,
-                 trait_model: Optional[dict] = None) -> list[dict]:
+                 trait_model: Optional[dict] = None,
+                 stopping_num_leaves: Optional[int] = None) -> list[dict]:
     """Run numbsim independent BDH simulations and return a list of result dicts.
 
     trait_model, if given, must supply callables under these keys:
@@ -36,7 +37,7 @@ def sim_bdh_age(age: float, numbsim: int,
         hyb_event_fxn(t1, t2, inher)         -- parents' traits + inheritance -> hybrid trait
         hyb_compatibility_fxn(t1, t2, hyb_trait) -- bool: whether the hybridization can occur
     """
-    params = SimParams(age=age, lambda_=lambda_, mu=mu, nu=nu, hybprops=hybprops, hyb_inher_fxn=hyb_inher_fxn, hyb_rate_fxn=hyb_rate_fxn)
+    params = SimParams(age=age, lambda_=lambda_, mu=mu, nu=nu, hybprops=hybprops, hyb_inher_fxn=hyb_inher_fxn, hyb_rate_fxn=hyb_rate_fxn, stopping_num_leaves=STOPPING_NUM_LEAVES)
     results = []
     for i in range(numbsim):
         state = SimState(mrca=mrca, Ngene=Ngene, trait_model=trait_model)
@@ -44,20 +45,21 @@ def sim_bdh_age(age: float, numbsim: int,
         if result["phy"] != 0:
             size = result['phy'].G.number_of_nodes()
             print(f"size for {i}: {size}")
-            if size < 100:
-                results.append(result)    
+            results.append(result)
     return results
 
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 
-AGE      = 4
+AGE      = 10
 NUMBSIM  = 30
 LAMBDA   = 0.5
 MU       = 0.1
 NU       = 0.5
-HYBPROPS = [1, 0, 1]   # [lineage generating, degenerative, neutral]
-MIN_CYCLE_LENGTH = 4
+HYBPROPS = [1, 1, 1]   # [lineage generating, degenerative, neutral]
+STOPPING_NUM_LEAVES = 10  # each sim also stops once it reaches this many leaves
+MIN_CYCLE_LENGTH = 3
+WEIGHT_ATTR = "length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time)
 
 hyb_inher_fxn = lambda: np.random.uniform(0, 1)
 hyb_rate_fxn  = None
@@ -69,8 +71,9 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
     if seed is not None:
         np.random.seed(seed)
 
-    if not os.path.exists(OUT_DIR):
-        os.makedirs(OUT_DIR)
+    if os.path.exists(SIM_OUTPUTS_DIR):
+        shutil.rmtree(SIM_OUTPUTS_DIR)
+    os.makedirs(PHYLO_CSV_DIR)
 
     results = sim_bdh_age(
         age=AGE,
@@ -84,6 +87,7 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
         hyb_rate_fxn=hyb_rate_fxn,  # None
         Ngene=0,
         trait_model=None,
+        stopping_num_leaves=STOPPING_NUM_LEAVES,
     )
     print(f"length of results:{len(results)}")
 
@@ -95,21 +99,12 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
         else:
             print(f"sim{i}: not extinct")
 
-        export_csv(phy, OUT_DIR, prefix=f"sim{i}_")
-        filtered_G = phy.filter_nodes(which_nodes=which_nodes)
-        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=os.path.join(HERE, os.pardir, "outputs"), which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH).find_cycles()
-
-        if gene_index is not None:
-            gtree = phy.gene_tree(gene_index)
-#            print(f"  gene {gene_index}: {gtree.number_of_nodes()} nodes, ",f"{gtree.number_of_edges()} edges")
+        export_csv(phy, PHYLO_CSV_DIR, prefix=f"sim{i}_")
+        filtered_G = phy.filter_nodes(which_nodes=which_nodes).to_undirected()
+        max_edge_length = max(d for _, _, d in filtered_G.edges(data=WEIGHT_ATTR))
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=max_edge_length).find_cycles()
+        print("next")
 
 
 if __name__ == "__main__":
-    pr = cProfile.Profile()
-    pr.enable()
     main()
-    pr.disable()
-    sortby = SortKey.CUMULATIVE
-    with open("profile", "w") as f:
-        ps = pstats.Stats(pr, stream=f).sort_stats(sortby)
-        ps.print_stats()

@@ -163,26 +163,23 @@ class SimState:
         self.G.nodes[species]['extinct'] = True
         self.leaves.discard(species)
 
-    def _edge_length(self, u: int, v: int) -> float:
-        """Current length of edge (u, v): sealed value, or elapsed time if still open."""
-        stored = self.G[u][v]['length']
+    def _edge_length(self, u: int, v: int, weight_attr: str = "length") -> float:
+        """Current weight_attr value of edge (u, v): sealed value, or elapsed time if still open."""
+        stored = self.G[u][v][weight_attr]
         if stored == 0.0 and v in self.leaves:
             return self.time - self.G.nodes[v]['timecreation']
         return stored
 
-    def tip_distance(self, tip1: int, tip2: int) -> float:
-        """Current genetic distance between two active leaves."""
-        path = nx.shortest_path(self.G.to_undirected(), tip1, tip2)
-        total = 0.0
-        for u, v in zip(path, path[1:]):
-            if self.G.has_edge(u, v):
-                total += self._edge_length(u, v)
-            else:
-                total += self._edge_length(v, u)
-        return total
+    def tip_distance(self, tip1: int, tip2: int, weight_attr: str = "length") -> float:
+        """Current distance (by weight_attr) between two active leaves, via minimum-weight path.
+        """
+        live = nx.Graph()
+        for u, v in self.G.edges():
+            live.add_edge(u, v, **{weight_attr: self._edge_length(u, v, weight_attr)})
+        return nx.shortest_path_length(live, tip1, tip2, weight=weight_attr)
 
-    def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None):
-        d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2)
+    def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None, weight_attr: str = "length"):
+        d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2, weight_attr)
 
         primary   = sp1 if (1 - inher) > 0.5 else sp2
         secondary = sp2 if primary == sp1 else sp1
