@@ -12,7 +12,7 @@ from tqdm.std import TqdmDefaultWriteLock
 TqdmDefaultWriteLock.mp_lock = None
 
 from sim_bdh import SimState, SimParams, _sim_one
-from export import export_csv
+from export import export_csv, export_filtered_edges_csv
 from find_cycles import CycleFinder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +59,8 @@ NU       = 0.5
 HYBPROPS = [1, 1, 1]   # [lineage generating, degenerative, neutral]
 STOPPING_NUM_LEAVES = 10  # each sim also stops once it reaches this many leaves
 MIN_CYCLE_LENGTH = 3
-WEIGHT_ATTR = "length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time)
+WEIGHT_ATTR = "time_length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time)
+DRESS_DISTANCE_MATRIX = "true_distance_between_tips"
 
 hyb_inher_fxn = lambda: np.random.uniform(0, 1)
 hyb_rate_fxn  = None
@@ -101,8 +102,9 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
 
         export_csv(phy, PHYLO_CSV_DIR, prefix=f"sim{i}_")
         filtered_G = phy.filter_nodes(which_nodes=which_nodes).to_undirected()
+        export_filtered_edges_csv(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_")
         max_edge_length = max(d for _, _, d in filtered_G.edges(data=WEIGHT_ATTR))
-        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=max_edge_length).find_cycles()
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=max_edge_length, dress_distance_matrix=DRESS_DISTANCE_MATRIX).find_cycles()
         print("next")
 
 

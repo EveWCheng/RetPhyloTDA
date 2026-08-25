@@ -3,6 +3,7 @@ import shutil
 import warnings
 import copy
 from collections import Counter
+from itertools import combinations
 import networkx as nx
 from network_lab_tda.data_prep.Data_Prep import Data_Prep
 from network_lab_tda.data_prep.Populate_Edge import Populate_Edge
@@ -13,7 +14,7 @@ from network_lab_tda.tda_visualisation.tda_visual import tda_visual_from_jason
 class CycleFinder:
     WEIGHT_ZERO_TOL = 0.0
 
-    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=True, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None, rips_threshold=float('inf')):
+    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=True, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None, rips_threshold=float('inf'), dress_distance_matrix=None):
         self.G = G
         self.populated_header_fn = populated_header_fn
         # cap on the Rips filtration passed to harmonic_cycle.run_harmonics() in the
@@ -55,6 +56,10 @@ class CycleFinder:
         self.cycle_output_path = os.path.join(output_dir, "cycle_outputs", sim_label)
         vis_suffix = "all_nodes" if which_nodes == "all_nodes" else "leaf_nodes"
         self.vis_output_path = os.path.join(self.cycle_output_path, vis_suffix)
+        # how the distance matrix is "dressed" (post-processed) after populate_edge
+        # options: None (no-op), "true_distance_between_tips" (overwrite tip<->tip
+        # cells with the true "length"-weighted shortest path, regardless of weight_attr)
+        self.dress_distance_matrix = dress_distance_matrix
 
     def _prepare_dirs(self):
         if not os.path.exists(self.output_path):
@@ -138,8 +143,21 @@ class CycleFinder:
         )
         plotter.cycle_plot()
 
+    def dress_distance_matrix_with_choice(self, dist_matrix, original_G):
+        if self.dress_distance_matrix == "true_distance_between_tips":
+            node_to_index = {node: idx for idx, node in self.index_to_node.items()}
+            leaf_nodes = [n for n, attrs in original_G.nodes(data=True) if attrs.get('is_leaf')]
+            for i, j in combinations(leaf_nodes, 2):
+                tip_dist = nx.shortest_path_length(original_G, source=i, target=j, weight='length')
+                idx_i, idx_j = node_to_index[i], node_to_index[j]
+                dist_matrix[idx_i, idx_j] = tip_dist
+                dist_matrix[idx_j, idx_i] = tip_dist
+        return dist_matrix
+
     def find_cycles(self):
         self._prepare_dirs()
+        # snapshot before use_data_prep's Populate_Edge mutates self.G in place
+        original_G = self.G.copy()
 
         if self.use_data_prep:
             print("preparing prep..")
@@ -151,6 +169,7 @@ class CycleFinder:
             dist_matrix = nx.floyd_warshall_numpy(self.G)
             self.index_to_name = dict(self.G.nodes(data="label"))
         self.index_to_node = dict(enumerate(self.G.nodes()))
+        dist_matrix = self.dress_distance_matrix_with_choice(dist_matrix, original_G)
 
         log_path = os.path.join(self.cycle_output_path, "rip.json")
 

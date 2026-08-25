@@ -163,23 +163,22 @@ class SimState:
         self.G.nodes[species]['extinct'] = True
         self.leaves.discard(species)
 
-    def _edge_length(self, u: int, v: int, weight_attr: str = "length") -> float:
-        """Current weight_attr value of edge (u, v): sealed value, or elapsed time if still open."""
-        stored = self.G[u][v][weight_attr]
+    def _edge_length(self, u: int, v: int) -> float:
+        stored = self.G[u][v]["length"]
         if stored == 0.0 and v in self.leaves:
             return self.time - self.G.nodes[v]['timecreation']
         return stored
 
-    def tip_distance(self, tip1: int, tip2: int, weight_attr: str = "length") -> float:
-        """Current distance (by weight_attr) between two active leaves, via minimum-weight path.
+    def tip_distance(self, tip1: int, tip2: int) -> float:
+        """Current distance between two active leaves, via minimum-weight path.
         """
         live = nx.Graph()
         for u, v in self.G.edges():
-            live.add_edge(u, v, **{weight_attr: self._edge_length(u, v, weight_attr)})
-        return nx.shortest_path_length(live, tip1, tip2, weight=weight_attr)
+            live.add_edge(u, v, length=self._edge_length(u, v))
+        return nx.shortest_path_length(live, tip1, tip2, weight="length")
 
-    def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None, weight_attr: str = "length"):
-        d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2, weight_attr)
+    def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None):
+        d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2)
 
         primary   = sp1 if (1 - inher) > 0.5 else sp2
         secondary = sp2 if primary == sp1 else sp1
@@ -299,11 +298,11 @@ class SimParams:
 
 
 def _sim_one(state: SimState, params: SimParams) -> dict:
-    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict}."""
+    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict, time_distance: dict}."""
     while True:
         n = len(state.leaves)
         if n == 0:
-            return {'phy': 0, 'distance': None}
+            return {'phy': 0, 'distance': None, 'time_distance': None}
         if params.stopping_num_leaves is not None and n >= params.stopping_num_leaves:
             break
 
@@ -489,4 +488,6 @@ def _build_output(state: SimState):
         tip_states=tip_states,
     )
     distance = dict(nx.all_pairs_dijkstra_path_length(state.G.to_undirected(),weight='length'))
-    return {'phy': phy, 'distance': distance}
+    time_distance = dict(nx.all_pairs_dijkstra_path_length(state.G.to_undirected(),weight='time_length'))
+
+    return {'phy': phy, 'distance': distance, 'time_distance': time_distance}
