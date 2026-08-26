@@ -56,14 +56,21 @@ NUMBSIM  = 30
 LAMBDA   = 0.5
 MU       = 0.1
 NU       = 0.5
-HYBPROPS = [1, 1, 1]   # [lineage generating, degenerative, neutral]
+HYBPROPS = [1, 0, 0]   # [lineage generating, degenerative, neutral]
 STOPPING_NUM_LEAVES = 10  # each sim also stops once it reaches this many leaves
-MIN_CYCLE_LENGTH = 3
-WEIGHT_ATTR = "time_length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time)
+MIN_CYCLE_LENGTH = 0
+WEIGHT_ATTR = "length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time). Should always be time_length
+# options: "true_distance_between_tips" (overwrite leaf-pair distances with true shortest-path tip distances),
+#          None (no dressing, use dist_matrix as computed)
 DRESS_DISTANCE_MATRIX = "true_distance_between_tips"
 
 hyb_inher_fxn = lambda: np.random.uniform(0, 1)
 hyb_rate_fxn  = None
+
+
+def should_populate_fxn(u, v, attrs):
+    """Don't add phantom nodes to reticulation edges."""
+    return attrs.get("edge_type") != "reticulation"
 
 
 # ── Run ───────────────────────────────────────────────────────────────────────
@@ -101,11 +108,16 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
             print(f"sim{i}: not extinct")
 
         export_csv(phy, PHYLO_CSV_DIR, prefix=f"sim{i}_")
-        filtered_G = phy.filter_nodes(which_nodes=which_nodes).to_undirected()
+        filtered_G = phy.filter_nodes(which_nodes=which_nodes)
+
         export_filtered_edges_csv(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_")
         max_edge_length = max(d for _, _, d in filtered_G.edges(data=WEIGHT_ATTR))
-        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=max_edge_length, dress_distance_matrix=DRESS_DISTANCE_MATRIX).find_cycles()
-        print("next")
+        # snapshot the network at each reticulation edge's own length, in addition to cycle-birth
+        # thresholds (CycleFinder appends those automatically since "fixed" isn't in threshold_mode)
+        retic_edge_lengths = [
+            attrs[WEIGHT_ATTR] for _, _, attrs in filtered_G.edges(data=True) if attrs.get("edge_type") == "reticulation"
+        ]
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=max_edge_length, dress_distance_matrix=DRESS_DISTANCE_MATRIX, should_populate_fxn=should_populate_fxn, thresholds=retic_edge_lengths).find_cycles()
 
 
 if __name__ == "__main__":

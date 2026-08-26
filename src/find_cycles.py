@@ -11,11 +11,20 @@ from network_lab_tda.tda_analysis import harmonic_cycle, harmonic_cycle_snapshot
 from network_lab_tda.tda_visualisation.tda_visual import tda_visual_from_jason
 
 
+def filter_edges(G: nx.DiGraph) -> nx.DiGraph:
+    """Remove all reticulation edges from G."""
+    G = G.copy()
+    for u, v, edge_type in list(G.edges(data="edge_type")):
+        if edge_type == "reticulation":
+            G.remove_edge(u, v)
+    return G
+
+
 class CycleFinder:
     WEIGHT_ZERO_TOL = 0.0
 
-    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=True, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None, rips_threshold=float('inf'), dress_distance_matrix=None):
-        self.G = G
+    def __init__(self, G, threshold_mode, cycle_qualify_mode, output_dir, populated_header_fn="populated_headers.txt", which_nodes="all_nodes", sim_label="", min_cycle_length=0, weight_attr="length", vis=True, use_data_prep=True, thresholds=None, sharing_unit="edge", sharing_which_cycles="all", delete_true_edges=False, max_plot_cycles=None, rips_threshold=float('inf'), dress_distance_matrix=None, should_populate_fxn=None):
+        self.G = G.to_undirected() if G.is_directed() else G
         self.populated_header_fn = populated_header_fn
         # cap on the Rips filtration passed to harmonic_cycle.run_harmonics() in the
         # non-"fixed" threshold_mode branch; float('inf') (default) reproduces the old
@@ -60,6 +69,9 @@ class CycleFinder:
         # options: None (no-op), "true_distance_between_tips" (overwrite tip<->tip
         # cells with the true "length"-weighted shortest path, regardless of weight_attr)
         self.dress_distance_matrix = dress_distance_matrix
+        # optional fn(u, v, attrs) -> bool; if given, only edges it approves get
+        # phantom nodes added in Populate_Edge, others are left untouched
+        self.should_populate_fxn = should_populate_fxn
 
     def _prepare_dirs(self):
         if not os.path.exists(self.output_path):
@@ -158,11 +170,13 @@ class CycleFinder:
         self._prepare_dirs()
         # snapshot before use_data_prep's Populate_Edge mutates self.G in place
         original_G = self.G.copy()
-
+        
+        print("preparing prep..G is getting filtered: reticulation edges deleted")
+        self.G = filter_edges(self.G)
+ 
         if self.use_data_prep:
-            print("preparing prep..")
             dp = Data_Prep(G=self.G, log_path=self.output_path, headers=False, weight_attr=self.weight_attr)
-            pe = Populate_Edge(G=dp.G, log_path=self.output_path, headers=False, populated_header_fn=self.populated_header_fn, max_node_per_edge=1, weight_attr=self.weight_attr)
+            pe = Populate_Edge(G=dp.G, log_path=self.output_path, headers=False, populated_header_fn=self.populated_header_fn, max_node_per_edge=1, weight_attr=self.weight_attr, should_populate_fxn=self.should_populate_fxn)
             dist_matrix = pe.populate_edges()
             self.index_to_name = pe.index_to_name
         else:

@@ -34,9 +34,9 @@ def export_csv(phy: PhyloNetwork, out_dir: str, prefix: str = ""):
 
     with open(edges_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["from", "to", "edge_type", "length", "time_length"])
+        w.writerow(["from", "to", "edge_type", "length", "time_length", "inher_weight"])
         for u, v, attrs in phy.G.edges(data=True):
-            w.writerow([u, v, attrs["edge_type"], attrs["length"], attrs["time_length"]])
+            w.writerow([u, v, attrs["edge_type"], attrs["length"], attrs["time_length"], attrs.get("inher_weight", "")])
 
 
 def export_filtered_edges_csv(filtered_G, out_dir: str, prefix: str = ""):
@@ -45,7 +45,7 @@ def export_filtered_edges_csv(filtered_G, out_dir: str, prefix: str = ""):
 
     with open(edges_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["from", "to", "edge_type", "length", "time_length"])
+        w.writerow(["from", "to", "edge_type", "length", "time_length", "inher_weight"])
         for u, v, attrs in filtered_G.edges(data=True):
             w.writerow([
                 filtered_G.nodes[u]["label"],
@@ -53,5 +53,6 @@ def export_filtered_edges_csv(filtered_G, out_dir: str, prefix: str = ""):
                 attrs["edge_type"],
                 attrs["length"],
                 attrs["time_length"],
+                attrs.get("inher_weight", ""),
             ])
 
