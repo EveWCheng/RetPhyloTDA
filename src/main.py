@@ -59,7 +59,7 @@ NU       = 0.5
 HYBPROPS = [1, 0, 0]   # [lineage generating, degenerative, neutral]
 STOPPING_NUM_LEAVES = 10  # each sim also stops once it reaches this many leaves
 MIN_CYCLE_LENGTH = 0
-WEIGHT_ATTR = "length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time). Should always be time_length
+WEIGHT_ATTR = "length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time). Should always be length
 # options: "true_distance_between_tips" (overwrite leaf-pair distances with true shortest-path tip distances),
 #          None (no dressing, use dist_matrix as computed)
 DRESS_DISTANCE_MATRIX = "true_distance_between_tips"
@@ -117,7 +117,8 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
         retic_edge_lengths = [
             attrs[WEIGHT_ATTR] for _, _, attrs in filtered_G.edges(data=True) if attrs.get("edge_type") == "reticulation"
         ]
-        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=max_edge_length, dress_distance_matrix=DRESS_DISTANCE_MATRIX, should_populate_fxn=should_populate_fxn, thresholds=retic_edge_lengths).find_cycles()
+        print(retic_edge_lengths)
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=float('inf'), dress_distance_matrix=DRESS_DISTANCE_MATRIX, should_populate_fxn=should_populate_fxn, thresholds=retic_edge_lengths).find_cycles()
 
 
 if __name__ == "__main__":

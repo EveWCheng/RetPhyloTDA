@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import warnings
 import copy
@@ -48,6 +49,9 @@ class CycleFinder:
         self.thresholds = thresholds if thresholds is not None else []
         self.qualifying_cycle_keys = []
         self.seen_markers = set()
+        # running log accumulated throughout find_cycles(); flushed as JSON to
+        # self.output_path/find_cycles_log.json at the end of find_cycles()
+        self.log = {}
         # list of units print_most_shared_units reports on, one output file per entry
         # "edge": count each edge's simplex as-is (existing behavior)
         # "node": flatten each edge's simplex to its individual node indices before counting,
@@ -72,6 +76,16 @@ class CycleFinder:
         # optional fn(u, v, attrs) -> bool; if given, only edges it approves get
         # phantom nodes added in Populate_Edge, others are left untouched
         self.should_populate_fxn = should_populate_fxn
+
+    def _log(self, key, value):
+        """Record key -> value in self.log (JSON-serialised on write) and echo it."""
+        print(f"{key}: {value}")
+        self.log[key] = value
+
+    def _write_log(self):
+        log_file = os.path.join(self.output_path, "find_cycles_log.json")
+        with open(log_file, "w") as f:
+            json.dump(self.log, f, indent=2, default=str)
 
     def _prepare_dirs(self):
         if not os.path.exists(self.output_path):
@@ -159,9 +173,31 @@ class CycleFinder:
         if self.dress_distance_matrix == "true_distance_between_tips":
             node_to_index = {node: idx for idx, node in self.index_to_node.items()}
             leaf_nodes = [n for n, attrs in original_G.nodes(data=True) if attrs.get('is_leaf')]
+            dress_log = self.log.setdefault("dress_distance_matrix", [])
             for i, j in combinations(leaf_nodes, 2):
-                tip_dist = nx.shortest_path_length(original_G, source=i, target=j, weight='length')
+                tip_dist, path = nx.single_source_dijkstra(original_G, i, target=j, weight='length')
+                reticulation_edges_on_path = []
+                for u, v in nx.utils.pairwise(path):
+                    attrs = original_G.edges[u, v]
+                    if attrs.get("edge_type") == "reticulation":
+                        reticulation_edges_on_path.append({
+                            "edge": [original_G.nodes[u].get("label", str(u)), original_G.nodes[v].get("label", str(v))],
+                            "inher_weight": attrs.get("inher_weight"),
+                        })
                 idx_i, idx_j = node_to_index[i], node_to_index[j]
+                old_dist = float(dist_matrix[idx_i, idx_j])
+                new_dist = float(tip_dist)
+                dress_log.append({
+                    "i": str(i),
+                    "j": str(j),
+                    "idx_i": int(idx_i),
+                    "idx_j": int(idx_j),
+                    "old_dist": old_dist,
+                    "new_dist": new_dist,
+                    "changed": old_dist != new_dist,
+                    "ratio": (new_dist - old_dist) / old_dist if old_dist else None,
+                    "reticulation_edges_on_path": reticulation_edges_on_path,
+                })
                 dist_matrix[idx_i, idx_j] = tip_dist
                 dist_matrix[idx_j, idx_i] = tip_dist
         return dist_matrix
@@ -199,6 +235,7 @@ class CycleFinder:
             print(self.index_to_name)
             self._visualize()
 
+        self._write_log()
         return self.cycle_log
 
     def _cycles_for(self):
