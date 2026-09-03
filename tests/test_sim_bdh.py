@@ -1,3 +1,5 @@
+import random
+
 import pytest
 import networkx as nx
 
@@ -193,15 +195,14 @@ def test_enumerate_gene_trees_degenerative_absorbs_secondary_with_no_trace():
 
     results = enumerate_gene_trees(G, n_samples="all")
 
-    assert len(results) == 2
-    by_weight = {round(w, 5): tree for tree, w in results}
-    assert set(by_weight.keys()) == {0.3, 0.7}
-
     # both resolutions collapse to the identical tree -- node 5 leaves no
-    # trace either way, since it never had its own continuation leaf
-    for tree in by_weight.values():
-        assert set(tree.nodes()) == {1, 3, 6}
-        assert set(tree.edges()) == {(1, 3), (1, 6)}
+    # trace either way, since it never had its own continuation leaf -- so
+    # only one distinct tree comes out, but it was generated twice
+    assert len(results) == 1
+    tree, count = next(iter(results.items()))
+    assert count == 2
+    assert set(tree.nodes()) == {1, 3, 6}
+    assert set(tree.edges()) == {(1, 3), (1, 6)}
 
 
 def test_enumerate_gene_trees_neutral_preserves_both_parents_as_distinct_leaves():
@@ -223,17 +224,59 @@ def test_enumerate_gene_trees_neutral_preserves_both_parents_as_distinct_leaves(
 
     results = enumerate_gene_trees(G, n_samples="all")
 
+    # the two resolutions produce distinct trees, so each is generated once
     assert len(results) == 2
-    by_weight = {round(w, 5): tree for tree, w in results}
-    assert set(by_weight.keys()) == {0.3, 0.7}
+    assert set(results.values()) == {1}
+    by_edges = {frozenset(tree.edges()): tree for tree in results}
 
-    tree_a = by_weight[0.7]  # edge (2,4) kept: node 2 survives as hub, node 5 pruned
+    edges_a = frozenset({(1, 2), (1, 3), (2, 6), (2, 7)})  # edge (2,4) kept: node 2 survives as hub, node 5 pruned
+    edges_b = frozenset({(1, 3), (1, 5), (5, 6), (5, 7)})  # edge (5,4) kept: node 5 survives as hub, node 2 pruned
+    assert set(by_edges.keys()) == {edges_a, edges_b}
+
+    tree_a = by_edges[edges_a]
     assert set(tree_a.nodes()) == {1, 2, 3, 6, 7}
-    assert set(tree_a.edges()) == {(1, 2), (1, 3), (2, 6), (2, 7)}
 
-    tree_b = by_weight[0.3]  # edge (5,4) kept: node 5 survives as hub, node 2 pruned
+    tree_b = by_edges[edges_b]
     assert set(tree_b.nodes()) == {1, 3, 5, 6, 7}
-    assert set(tree_b.edges()) == {(1, 3), (1, 5), (5, 6), (5, 7)}
+
+
+def test_enumerate_gene_trees_numeric_n_samples_counts_weighted_repeats():
+    # same graph as the "neutral" test above: one reticulate node (4) fed by
+    # edges weighted 0.7 (from 2) and 0.3 (from 5), each resolution staying
+    # a distinct tree -- but now n_samples exceeds the number of distinct
+    # resolutions, so counts should reflect the inher_weight split
+    G = nx.DiGraph()
+    G.add_node(1, is_leaf=False)
+    G.add_node(2, is_leaf=False)
+    G.add_node(3, is_leaf=True)
+    G.add_node(4, is_leaf=False, is_hyb_node=True)
+    G.add_node(5, is_leaf=False)
+    G.add_node(6, is_leaf=True, is_hyb_leaf=True)
+    G.add_node(7, is_leaf=True)
+    G.add_edge(1, 2)
+    G.add_edge(1, 3)
+    G.add_edge(2, 4, inher_weight=0.7)
+    G.add_edge(2, 5)
+    G.add_edge(4, 6)
+    G.add_edge(5, 4, inher_weight=0.3)
+    G.add_edge(5, 7)
+
+    rng = random.Random(42)
+    results = enumerate_gene_trees(G, n_samples=20, rng=rng)
+
+    assert sum(results.values()) == 20
+    assert len(results) == 2
+
+    by_edges = {frozenset(tree.edges()): count for tree, count in results.items()}
+    edges_a = frozenset({(1, 2), (1, 3), (2, 6), (2, 7)})  # edge (2,4) kept
+    edges_b = frozenset({(1, 3), (1, 5), (5, 6), (5, 7)})  # edge (5,4) kept
+    assert set(by_edges.keys()) == {edges_a, edges_b}
+
+    # both trees show up more than once, and the 0.7-weighted resolution
+    # is drawn more often than the 0.3-weighted one
+    assert by_edges[edges_a] > 1
+    assert by_edges[edges_b] > 1
+    assert by_edges[edges_a] > by_edges[edges_b]
 
 
 def test_enumerate_gene_trees_generating_keeps_both_parents_and_a_new_hyb_node():
@@ -259,17 +302,20 @@ def test_enumerate_gene_trees_generating_keeps_both_parents_and_a_new_hyb_node()
 
     results = enumerate_gene_trees(G, n_samples="all")
 
+    # the two resolutions produce distinct trees, so each is generated once
     assert len(results) == 2
-    by_weight = {round(w, 5): tree for tree, w in results}
-    assert set(by_weight.keys()) == {0.3, 0.7}
+    assert set(results.values()) == {1}
+    by_edges = {frozenset(tree.edges()): tree for tree in results}
 
-    tree_a = by_weight[0.7]  # edge (4,8) kept: node 4 survives as hub, node 5 pruned
+    edges_a = frozenset({(1, 2), (1, 3), (2, 4), (2, 7), (4, 6), (4, 9)})  # edge (4,8) kept: node 4 survives as hub, node 5 pruned
+    edges_b = frozenset({(1, 2), (1, 3), (2, 5), (2, 6), (5, 7), (5, 9)})  # edge (5,8) kept: node 5 survives as hub, node 4 pruned
+    assert set(by_edges.keys()) == {edges_a, edges_b}
+
+    tree_a = by_edges[edges_a]
     assert set(tree_a.nodes()) == {1, 2, 3, 4, 6, 7, 9}
-    assert set(tree_a.edges()) == {(1, 2), (1, 3), (2, 4), (2, 7), (4, 6), (4, 9)}
 
-    tree_b = by_weight[0.3]  # edge (5,8) kept: node 5 survives as hub, node 4 pruned
+    tree_b = by_edges[edges_b]
     assert set(tree_b.nodes()) == {1, 2, 3, 5, 6, 7, 9}
-    assert set(tree_b.edges()) == {(1, 2), (1, 3), (2, 5), (2, 6), (5, 7), (5, 9)}
 
 
 # mrca=True should start the sim with a root and two active leaf lineages

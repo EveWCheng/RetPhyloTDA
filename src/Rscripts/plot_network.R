@@ -77,9 +77,14 @@ build_phy <- function(nodes, edges) {
 
 # ── Read one sim's CSVs, plot it, and write the PDF ───────────────────────────
 
-plot_sim <- function(sim_index) {
-  nodes_file <- file.path(IN_DIR, paste0("sim", sim_index, "_nodes.csv"))
-  edges_file <- file.path(IN_DIR, paste0("sim", sim_index, "_edges.csv"))
+# kind = "" plots simN_nodes.csv/simN_edges.csv (raw phy.G, export_csv);
+# kind = "filtered_" plots simN_filtered_nodes.csv/simN_filtered_edges.csv
+# (the "no_hyb_nodes"-collapsed graph gene-tree enumeration actually runs on,
+# export_filtered) -- same node IDs as the raw graph, just fewer nodes, so the
+# two PDFs stay directly comparable.
+plot_sim <- function(sim_index, kind = "") {
+  nodes_file <- file.path(IN_DIR, paste0("sim", sim_index, "_", kind, "nodes.csv"))
+  edges_file <- file.path(IN_DIR, paste0("sim", sim_index, "_", kind, "edges.csv"))
 
   nodes <- read.csv(nodes_file, stringsAsFactors = FALSE)
   edges <- read.csv(edges_file, stringsAsFactors = FALSE)
@@ -87,17 +92,19 @@ plot_sim <- function(sim_index) {
   phy <- build_phy(nodes, edges)
   internal_ids <- attr(phy, "internal_ids")
 
-  out_file <- file.path(PLOT_DIR, paste0("sim", sim_index, "_network.pdf"))
+  out_file <- file.path(PLOT_DIR, paste0("sim", sim_index, "_", kind, "network.pdf"))
   pdf(out_file)
   on.exit(dev.off(), add = TRUE)
+
+  title_label <- paste0("BDH Network - ", if (kind == "") "raw" else "filtered", " - sim", sim_index)
 
   if (length(phy$tip.label) < 2) {
     # ape::plot.phylo/nodelabels require >= 2 tips to set up a plot region
     plot.new()
-    title(main = paste("BDH Network - sim", sim_index))
+    title(main = title_label)
     text(0.5, 0.5, paste("Only", length(phy$tip.label), "tip - nothing to plot"))
   } else {
-    plot(phy, main = paste("BDH Network - sim", sim_index))
+    plot(phy, main = title_label)
     internal_labels <- nodes$label[match(internal_ids, nodes$id)]
     ape::nodelabels(text = internal_labels, cex = 0.6, frame = "none", col = "blue")
   }
@@ -108,11 +115,13 @@ plot_sim <- function(sim_index) {
 # ── Run ────────────────────────────────────────────────────────────────────────
 
 for (sim_index in sim_indices) {
-  result <- tryCatch({
-    plot_sim(sim_index)
-    TRUE
-  }, error = function(e) {
-    cat("Skipping sim", sim_index, "- error:", conditionMessage(e), "\n")
-    FALSE
-  })
+  for (kind in c("", "filtered_")) {
+    result <- tryCatch({
+      plot_sim(sim_index, kind)
+      TRUE
+    }, error = function(e) {
+      cat("Skipping sim", sim_index, "kind='", kind, "' - error:", conditionMessage(e), "\n")
+      FALSE
+    })
+  }
 }

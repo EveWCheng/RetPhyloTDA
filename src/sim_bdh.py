@@ -418,18 +418,12 @@ def enumerate_gene_trees(
     G: nx.DiGraph,
     n_samples: int | str = "all",
     rng: random.Random | None = None,
-    dedupe: bool = False,
-) -> list[tuple[nx.DiGraph, float]]:
+) -> dict[nx.DiGraph, int]:
     retic_nodes = [n for n in G if G.in_degree(n) > 1]
     choices = [list(G.in_edges(n, data='inher_weight')) for n in retic_nodes]
     all_edges = {(u, v) for edges in choices for u, v, _ in edges}
 
-    total_combos = 1
-    for edges in choices:
-        total_combos *= len(edges)
-    n_samples = total_combos if n_samples == "all" else min(n_samples, total_combos)
-
-    if n_samples == total_combos:
+    if n_samples == "all":
         combos = itertools.product(*choices)
     else:
         rng = rng or random
@@ -438,24 +432,19 @@ def enumerate_gene_trees(
             for _ in range(n_samples)
         )
 
-    results = []
-    seen = set()
+    counts: dict[frozenset, int] = {}
+    trees: dict[frozenset, nx.DiGraph] = {}
     for combo in combos:
         chosen = {(u, v) for u, v, _ in combo}
         dropped = all_edges - chosen
-        weight = 1.0
-        for _, _, w in combo:
-            weight *= w
         kept = [(u, v) for u, v in G.edges() if (u, v) not in dropped]
         tree = G.edge_subgraph(kept).copy()
         tree = _suppress_unary_nodes(tree)
-        if dedupe:
-            key = frozenset(tree.edges())
-            if key in seen:
-                continue
-            seen.add(key)
-        results.append((tree, weight))
-    return results
+        key = frozenset(tree.edges())
+        counts[key] = counts.get(key, 0) + 1
+        trees.setdefault(key, tree)
+
+    return {trees[key]: count for key, count in counts.items()}
 
 
 def _assign_labels(G: nx.DiGraph):

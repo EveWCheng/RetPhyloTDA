@@ -12,7 +12,7 @@ from tqdm.std import TqdmDefaultWriteLock
 TqdmDefaultWriteLock.mp_lock = None
 
 from sim_bdh import SimState, SimParams, _sim_one
-from export import export_csv, export_filtered_edges_csv
+from export import export_csv, export_filtered
 from find_cycles import CycleFinder
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -111,7 +111,7 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
         export_csv(phy, PHYLO_CSV_DIR, prefix=f"sim{i}_")
         filtered_G = phy.filter_nodes(which_nodes=which_nodes)
 
-        export_filtered_edges_csv(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_")
+        export_filtered(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_")
         max_edge_length = max(d for _, _, d in filtered_G.edges(data=WEIGHT_ATTR))
         # snapshot the network at each reticulation edge's own length, in addition to cycle-birth
         # thresholds (CycleFinder appends those automatically since "fixed" isn't in threshold_mode)

@@ -274,3 +274,147 @@ threshold sits at 50%. Caveat for real data: `d_tree` there is estimated from
 the same sequences, and reticulations bias that estimate toward smaller
 divergences, so the observed shortening is attenuated below the true value
 (affects any tree-differencing method, not just this one).
+
+***2026-09-03 — Recovering known reticulations from `tree_main.py`'s merged gene trees, and how much of that is actually TDA
+
+## What we did
+
+Worked entirely in the `tree_main.py` pipeline (gene-tree enumeration → merge →
+cycle detection), on one simulated network (seed 43, `NU=0.01`) with **3 known
+reticulation events**, confirmed by direct inspection of `filtered_G`'s
+in-degree-2 nodes and their `inher_weight`s:
+
+| retic (in `filtered_G`) | dominant parent | minority parent | hyb leaf(ves) |
+|---|---|---|---|
+| `hyb23` | `-18` (own leaves 34,37,54,55), w=0.67 | `-14`, w=0.33 | 46, 48, 49 |
+| `hyb37` | `-12` → sp35, w=0.80 | `-30` → sp34, w=0.20 | 37 |
+| `hyb53` | `-42` → sp51, w=0.90 | `-15` → sp50, w=0.10 | 53 |
+
+Goal: given only the enumerated gene trees, recover which merged-graph edges
+correspond to these 3 events, with as little noise as possible.
+
+## Preliminary fixes along the way
+
+- `enumerate_gene_trees` (`sim_bdh.py`) changed from returning `list[(tree,
+  weight)]` to `dict[tree, count]` — a caller now cares how many times a given
+  topology got sampled, not just its analytic weight. Updated `tree_main.py`
+  and `tests/test_sim_bdh.py` accordingly (dedupe now falls out of the dict key
+  naturally; added a seeded-`random.Random` test for the weighted-sampling path).
+- `export_filtered` (renamed from `export_filtered_edges_csv`, `export.py`) now
+  also writes a nodes CSV, so `plot_network.R`'s filtered-network PDF uses the
+  same node-ID namespace as the rest of the pipeline (`filtered_G`, the
+  `no_hyb_nodes`-collapsed graph) instead of raw `phy.G`'s IDs. `plot_network.R`
+  now plots both `simN_network.pdf` (raw) and `simN_filtered_network.pdf`.
+- Added `leaf_labels_by_number` (`tree_main.py`) — captures each leaf's
+  `spN`/`hybN` label from `filtered_G` *before* merging strips labels down to
+  bare numbers (`networkx_to_tree_groups`), so `tree_by_tree_delete`'s output
+  can show `hyb53` instead of `53`.
+
+## `CycleFinder.tree_by_tree_delete` (`find_cycles.py`) — the TDA-based route
+
+New method: rank `enumerate_gene_trees`' distinct trees by sample count, take
+the **intersection** (not union) of the top-`number` trees' edges as
+`delete_edges` (removes only the backbone every top tree agrees on — edges
+where they disagree, i.e. contested reticulation choices, survive), then count
+each surviving cycle edge's frequency across all detected harmonic cycles.
+
+Iteratively added two post-processing boosts on top of the raw counts, both
+essential to cutting noise:
+
+1. **Ranked by inclusion** (pre-existing pattern, reused): an edge's count
+   picks up every other edge's count where that edge is a pointwise superset —
+   smaller/more specific edges absorb their parents' counts.
+2. **Complementary split** (new): for an edge with a shorter point and a longer
+   point, if `{complement of shorter within longer, longer}` also exists as an
+   edge, the two are alternative resolutions of the *same* split — this is the
+   actual reticulation signature (see below). Bump one edge's count by the
+   other's, **and delete the absorbed one**, once per pair.
+
+Both boosts were then also given a "delete what got absorbed" variant (keep
+only the higher-count survivor of each relationship, not both) — this is what
+took the output from noisy to clean.
+
+### Dead ends tried and reverted
+
+- Requiring both edge endpoints to have `merged_G` degree ≥ 3: worked
+  partially but is the wrong direction — verified via instrumentation that the
+  relaxed "skip only if *both* sides are degree < 3" version never fires (every
+  edge always has ≥1 side with degree ≥ 3 in this data), so it's a no-op.
+- Excluding the merged-tree root (the point holding every leaf): also verified
+  via instrumentation to never fire — the root (23 leaves) never appears as a
+  cycle-edge endpoint at all (max observed point size in any cycle: 19), so
+  this filter had nothing to catch.
+- "Only keep edges that found a complementary partner" (filter, not merge):
+  also a no-op — *every* edge in a normal bifurcating tree has a complementary
+  sibling by definition (that's what having two children means), so this
+  doesn't discriminate reticulation-driven splits from ordinary tree structure
+  at all.
+
+### A real point of confusion, resolved
+
+Repeatedly mistook the **dominant/majority** parent edge (e.g. `sp51 → hyb53`,
+a plain `edge_type="tree"` edge, visually an ordinary branch in the R plot) for
+"the" reticulation signal. It isn't — it's just the normal tree-continuation
+edge, present in most merged trees regardless of reticulation. The actual
+raw-CSV `edge_type="reticulation"` edge (and the one `ape::plot.evonet` draws
+as a blue line) is the **minority** parent edge (`sp50 → hyb53`). The real
+reticulation signature is that a node's parent connection **splits** into two
+complementary partial counts (e.g. 4/7 and 3/7 trees) instead of being present
+in all trees — neither entry alone is "the" signal, the *pair* is.
+
+### `number` (how many top trees to intersect) sweep, same network throughout
+
+| `number` | output lines | notes |
+|--:|--:|---|
+| 1 | 10 | all clean, all 3 events represented, one entry per split |
+| 2 | 9 | tightest result |
+| 3 | 10 | both sides of `hyb37`'s split reappear as separate entries (intersecting more trees removes less common backbone, so some splits stop merging) |
+
+Bigger `number` isn't monotonically better — noise creeps back in as fewer
+edges are common to *all* N top trees.
+
+## `polymorphic_edges.py` — a much simpler alternative, tried first
+
+New standalone module, no cycle detection at all: for each edge, count how
+many of the *distinct* resolved trees (not weighted by sample count) contain
+it. An edge tied to exactly one independent reticulation choice is invariant
+to the other choices, so it appears in ~`total/2` trees; an edge that only
+exists under a *specific combination* of `k` simultaneous choices appears in
+only `total/2^k` trees. This cleanly separates real single-choice splits
+(near-half counts) from combinatorial noise (low counts), with zero tuning.
+
+First pass (no filtering): 74 lines, all 3 events in the top ~20, but mixed
+with composite noise even there.
+
+## Comparison
+
+Once `tree_by_tree_delete` got the complementary-split merge-and-delete step,
+it beat `polymorphic_edges` outright on this network: **9–10 lines, zero
+composite noise**, vs. `polymorphic_edges`' 74 lines with noise mixed into the
+top tier. Tradeoff: merging each complementary pair into one winning entry
+loses the "how contested" signal (`polymorphic_edges`' raw `4/7` vs `3/7`
+told you how close the two resolutions were; the merged TDA output only shows
+one consolidated count).
+
+
+
+## Follow-up: reticulate-edge pairing, and TDA still isn't earning its keep
+
+Added a "reticulate edges" step to both methods: group by shared child
+point, pair up parents, keep pairs splitting distinct trees evenly. Recovers
+all 3 true reticulations but also false positives (ordinary leaves with two
+unrelated neighbors); several extra filters tried (mutual exclusivity, full
+coverage, balanced split) don't discriminate real from false. Checked cycle
+coverage: most detected cycles span 66% of `merged_G`, barely selective.
+Ported the technique into `polymorphic_edges.py`; once both sides ran the
+same ranked-by-inclusion step, results converged exactly — no TDA advantage.
+Next idea: give `merged_G` edges real lengths (via `n_graph`) to test nested
+"hybrid-on-hybrid" cases.the problem with the inclusion deletion is that we are ignoring the potential hybrid-species hybridisation higher up in the tree. So potentially TDA could do something about that by changing the edge length so we dont need to do this inclusion deletion
+
+## Idea: real edge lengths could avoid inclusion-deletion's data loss
+
+Inclusion-deletion discards the "superset" edge outright, permanently losing
+any nested hybrid-on-hybrid signal it might represent. Real edge lengths +
+multi-scale persistence could instead let nested reticulations surface as
+separate cycles at different filtration thresholds, with nothing deleted.
+Untested: no nested case in current network; still single-threshold.

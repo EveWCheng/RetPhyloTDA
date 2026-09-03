@@ -329,6 +329,159 @@ class CycleFinder:
             return self.sharing_nodes_frequency()
         raise ValueError(f"Unknown sharing_unit option: {unit}")
 
+    def _tree_edge_set(self, tree):
+        # networkx_to_tree_json already rewrote every node's "label" to the
+        # leaf-label tuple for its clade, matching merged_G's node labels
+        return {
+            frozenset({tuple(tree.nodes[u]["label"]), tuple(tree.nodes[v]["label"])})
+            for u, v in tree.edges()
+        }
+
+    def tree_by_tree_delete(self, enumerate_trees, number, leaf_labels=None):
+        top_trees = sorted(enumerate_trees.items(), key=lambda kv: kv[1], reverse=True)[:number]
+
+        edge_sets = [self._tree_edge_set(tree) for tree, _count in top_trees]
+        delete_edges = set.intersection(*edge_sets) if edge_sets else set()
+
+        counts = Counter()
+        for cycle in self._cycles_for():
+            edge_keys = set()
+            for edge in cycle["edges"]:
+                if abs(edge["weight"]) <= self.WEIGHT_ZERO_TOL:
+                    continue
+                key = frozenset(self._named_point(idx) for idx in edge["simplex"])
+                if key in delete_edges:
+                    continue
+                edge_keys.add(key)
+            counts.update(edge_keys)
+
+        # ranked by inclusion
+        cumulative_counts = copy.deepcopy(counts)
+        to_delete = set()
+        for edge in counts:
+            a1, a2 = tuple(edge)
+            for other_edge in counts:
+                if edge == other_edge:
+                    continue
+                b1, b2 = tuple(other_edge)
+                included = (set(a1) <= set(b1) and set(a2) <= set(b2)) or (set(a1) <= set(b2) and set(a2) <= set(b1))
+                if included:
+                    cumulative_counts[edge] += counts[other_edge]
+                    to_delete.add(other_edge)
+        counts = {e: c for e, c in cumulative_counts.items() if e not in to_delete}
+
+        # complementary split -- disabled for now
+        # seen = set()
+        # to_delete = set()
+        # cumulative_counts = copy.deepcopy(counts)
+        # for edge in counts:
+        #     if edge in seen:
+        #         continue
+        #     p1, p2 = tuple(edge)
+        #     if len(p1) == len(p2):
+        #         continue
+        #     short, long_ = (p1, p2) if len(p1) < len(p2) else (p2, p1)
+        #     complement = tuple(sorted(set(long_) - set(short)))
+        #     candidate = frozenset({complement, long_})
+        #     if candidate in counts and candidate not in seen:
+        #         cumulative_counts[edge] += counts[candidate]
+        #         to_delete.add(candidate)
+        #         seen.add(edge)
+        #         seen.add(candidate)
+        # counts = {e: c for e, c in cumulative_counts.items() if e not in to_delete}
+
+        # keep only edges that share a point with at least one other edge --
+        # a point with no competing resolution is not a reticulation signal
+
+        # step 1: group all edges by point. usually that's just the shorter of
+        # an edge's two points, but if both points are the same length (no
+        # single "short" one), index the edge under both of them
+        edges_by_point = {}
+        for edge in counts:
+            point_a, point_b = tuple(edge)
+            if len(point_a) < len(point_b):
+                grouping_points = [point_a]
+            elif len(point_b) < len(point_a):
+                grouping_points = [point_b]
+            else:
+                grouping_points = [point_a, point_b]
+            for point in grouping_points:
+                if point not in edges_by_point:
+                    edges_by_point[point] = []
+                edges_by_point[point].append(edge)
+
+        # step 2: an edge survives only if at least one of the points it was
+        # grouped under has more than one edge in it (i.e. some other edge
+        # shares that point)
+        edges_to_keep = set()
+        for point, edges in edges_by_point.items():
+            if len(edges) > 1:
+                for edge in edges:
+                    edges_to_keep.add(edge)
+
+        # step 3: filter counts down to just the survivors
+        counts = {edge: count for edge, count in counts.items() if edge in edges_to_keep}
+
+        leaf_labels = leaf_labels or {}
+
+        def labeled(point):
+            return tuple(leaf_labels.get(n, n) for n in sorted(point))
+
+        log_fn = f"shared_edges_{self.sharing_which_cycles}_top{number}_deleted.txt"
+        log_path = os.path.join(self.cycle_output_path, log_fn)
+        with open(log_path, "w") as f:
+            for key, count in sorted(counts.items(), key=lambda kv: kv[1], reverse=True):
+                names = tuple(labeled(point) for point in sorted(key))
+                f.write(f"{names}: {count}\n")
+
+        # reticulate edges: for every point shared by 2+ edges, the "other"
+        # point of each of those edges is a candidate parent -- report every
+        # pair of parents (there can be more than 2 if the point is shared by
+        # more than 2 edges) as a detected reticulation, annotated with
+        # whether the two parent-edges are mutually exclusive across the
+        # distinct resolved trees. A genuine reticulation choice never has
+        # both edges (or neither) in the same tree -- exactly one always
+        # wins. An ordinary structural coincidence (e.g. an unrelated sibling
+        # relationship) can have both at once.
+        tree_edge_sets = [self._tree_edge_set(tree) for tree in enumerate_trees]
+
+        reticulate_fn = f"reticulate_edges_{self.sharing_which_cycles}_top{number}.txt"
+        reticulate_path = os.path.join(self.cycle_output_path, reticulate_fn)
+        with open(reticulate_path, "w") as f:
+            for shared_point, edges in edges_by_point.items():
+                if len(edges) <= 1:
+                    continue
+                parents = []
+                for edge in edges:
+                    point_a, point_b = tuple(edge)
+                    parent = point_b if point_a == shared_point else point_a
+                    parents.append(parent)
+                for parent_a, parent_b in combinations(parents, 2):
+                    edge_a = frozenset({shared_point, parent_a})
+                    edge_b = frozenset({shared_point, parent_b})
+
+                    only_a = 0
+                    only_b = 0
+                    neither = 0
+                    for tree_edges in tree_edge_sets:
+                        has_a = edge_a in tree_edges
+                        has_b = edge_b in tree_edges
+                        if has_a:
+                            only_a += 1
+                        elif has_b:
+                            only_b += 1
+                        else:
+                            neither += 1
+                    # a candidate pair only survives if the two sides split
+                    # the trees evenly (only_a == only_b)
+                    if only_a != only_b:
+                        continue
+
+                    f.write(
+                        f"{labeled(shared_point)}: {labeled(parent_a)} -- {labeled(parent_b)} "
+                        f"| only_a={only_a} only_b={only_b} neither={neither}\n"
+                    )
+
     def print_most_shared_units(self, top_n=None):
         for unit in self.sharing_unit:
             counts = self._frequency_for_unit(unit)
