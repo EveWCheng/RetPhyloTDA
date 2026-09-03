@@ -20,7 +20,9 @@ def export_csv(phy: PhyloNetwork, out_dir: str, prefix: str = ""):
 
     with open(nodes_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["id", "label", "type"])
+        # 'type' is a display category (hyb_leaf sticks even after the node speciates);
+        # 'is_leaf' is the live tip status -- use it, not type, to decide what is a tip.
+        w.writerow(["id", "label", "type", "is_leaf"])
         for n, attrs in phy.G.nodes(data=True):
             if attrs.get("extinct"):
                 ntype = "extinct"
@@ -30,7 +32,7 @@ def export_csv(phy: PhyloNetwork, out_dir: str, prefix: str = ""):
                 ntype = "leaf"
             else:
                 ntype = "internal"
-            w.writerow([n, attrs['label'], ntype])
+            w.writerow([n, attrs['label'], ntype, bool(attrs["is_leaf"])])
 
     with open(edges_path, "w", newline="") as f:
         w = csv.writer(f)

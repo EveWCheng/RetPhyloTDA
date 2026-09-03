@@ -52,10 +52,11 @@ def sim_bdh_age(age: float, numbsim: int,
 # ── Parameters ────────────────────────────────────────────────────────────────
 
 AGE      = 10
-NUMBSIM  = 30
-LAMBDA   = 0.5
+NUMBSIM  = 80
+#speciation
+LAMBDA   = 0.1
 MU       = 0.1
-NU       = 0.5
+NU       = 0.3
 HYBPROPS = [1, 0, 0]   # [lineage generating, degenerative, neutral]
 STOPPING_NUM_LEAVES = 10  # each sim also stops once it reaches this many leaves
 MIN_CYCLE_LENGTH = 0
@@ -115,10 +116,10 @@ def main(seed=42, gene_index: Optional[int] = None, which_nodes: str = "no_hyb_n
         # snapshot the network at each reticulation edge's own length, in addition to cycle-birth
         # thresholds (CycleFinder appends those automatically since "fixed" isn't in threshold_mode)
         retic_edge_lengths = [
-            attrs[WEIGHT_ATTR] for _, _, attrs in filtered_G.edges(data=True) if attrs.get("edge_type") == "reticulation"
+            attrs[WEIGHT_ATTR]+1e-2 for _, _, attrs in filtered_G.edges(data=True) if attrs.get("edge_type") == "reticulation"
         ]
         print(retic_edge_lengths)
-        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, rips_threshold=float('inf'), dress_distance_matrix=DRESS_DISTANCE_MATRIX, should_populate_fxn=should_populate_fxn, thresholds=retic_edge_lengths).find_cycles()
+        CycleFinder(filtered_G, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir=SIM_OUTPUTS_DIR, which_nodes=which_nodes, sim_label=f"sim{i}", min_cycle_length=MIN_CYCLE_LENGTH, weight_attr=WEIGHT_ATTR, use_data_prep=False, rips_threshold=float('inf'), dress_distance_matrix=DRESS_DISTANCE_MATRIX, should_populate_fxn=should_populate_fxn, thresholds=retic_edge_lengths).find_cycles()
 
 
 if __name__ == "__main__":

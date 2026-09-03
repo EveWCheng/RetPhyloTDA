@@ -3,7 +3,7 @@ from find_cycles import CycleFinder
 
 
 def _cf(min_cycle_length=0):
-    return CycleFinder(G=None, threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir="/tmp/find_cycles_test", min_cycle_length=min_cycle_length)
+    return CycleFinder(G=nx.Graph(), threshold_mode=["cyclelength", "marker"], cycle_qualify_mode=["marker"], output_dir="/tmp/find_cycles_test", min_cycle_length=min_cycle_length)
 
 
 def _cycle(birth, edges):
@@ -82,7 +82,7 @@ def test_qualifying_cycle_crossover_shared_source_qualifies():
 # "fixed" mode should gate cycle_qualify by a pre-set thresholds list rather
 # than deriving thresholds from cycle data, and must not grow that list
 def test_generate_threshold_cycle_keys_fixed_mode_does_not_grow_thresholds():
-    cf = CycleFinder(G=None, threshold_mode=["fixed"], cycle_qualify_mode=[], output_dir="/tmp/find_cycles_test", thresholds=[1])
+    cf = CycleFinder(G=nx.Graph(), threshold_mode=["fixed"], cycle_qualify_mode=[], output_dir="/tmp/find_cycles_test", thresholds=[1])
     cf.cycle_log = {"harmonic_cycles": [
         _cycle(0.5, [([0, 1], 0.5)]),  # born before threshold 1 -> qualifies
         _cycle(2.0, [([0, 1], 0.5)]),  # born after threshold 1 -> doesn't qualify

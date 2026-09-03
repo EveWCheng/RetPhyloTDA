@@ -5,6 +5,7 @@ import warnings
 import copy
 from collections import Counter
 from itertools import combinations
+import numpy as np
 import networkx as nx
 from network_lab_tda.data_prep.Data_Prep import Data_Prep
 from network_lab_tda.data_prep.Populate_Edge import Populate_Edge
@@ -175,21 +176,26 @@ class CycleFinder:
             leaf_nodes = [n for n, attrs in original_G.nodes(data=True) if attrs.get('is_leaf')]
             dress_log = self.log.setdefault("dress_distance_matrix", [])
             for i, j in combinations(leaf_nodes, 2):
-                tip_dist, path = nx.single_source_dijkstra(original_G, i, target=j, weight='length')
+                tip_dist = nx.shortest_path_length(original_G, i, j, weight='length')
+                # length=0.0 edges make shortest paths non-unique; log every
+                # reticulation on ANY co-shortest path, once per tip pair
                 reticulation_edges_on_path = []
-                for u, v in nx.utils.pairwise(path):
-                    attrs = original_G.edges[u, v]
-                    if attrs.get("edge_type") == "reticulation":
-                        reticulation_edges_on_path.append({
-                            "edge": [original_G.nodes[u].get("label", str(u)), original_G.nodes[v].get("label", str(v))],
-                            "inher_weight": attrs.get("inher_weight"),
-                        })
+                seen = set()
+                for path in nx.all_shortest_paths(original_G, i, j, weight='length'):
+                    for u, v in nx.utils.pairwise(path):
+                        attrs = original_G.edges[u, v]
+                        if attrs.get("edge_type") == "reticulation" and frozenset((u, v)) not in seen:
+                            seen.add(frozenset((u, v)))
+                            reticulation_edges_on_path.append({
+                                "edge": [original_G.nodes[u].get("label", str(u)), original_G.nodes[v].get("label", str(v))],
+                                "inher_weight": attrs.get("inher_weight"),
+                            })
                 idx_i, idx_j = node_to_index[i], node_to_index[j]
                 old_dist = float(dist_matrix[idx_i, idx_j])
                 new_dist = float(tip_dist)
                 dress_log.append({
-                    "i": str(i),
-                    "j": str(j),
+                    "i": original_G.nodes[i].get("label", str(i)),
+                    "j": original_G.nodes[j].get("label", str(j)),
                     "idx_i": int(idx_i),
                     "idx_j": int(idx_j),
                     "old_dist": old_dist,
@@ -212,12 +218,23 @@ class CycleFinder:
  
         if self.use_data_prep:
             dp = Data_Prep(G=self.G, log_path=self.output_path, headers=False, weight_attr=self.weight_attr)
-            pe = Populate_Edge(G=dp.G, log_path=self.output_path, headers=False, populated_header_fn=self.populated_header_fn, max_node_per_edge=1, weight_attr=self.weight_attr, should_populate_fxn=self.should_populate_fxn)
+            pe = Populate_Edge(G=dp.G, log_path=self.output_path, headers=False, populated_header_fn=self.populated_header_fn, max_node_per_edge=0, weight_attr=self.weight_attr, should_populate_fxn=self.should_populate_fxn)
             dist_matrix = pe.populate_edges()
             self.index_to_name = pe.index_to_name
         else:
-            dist_matrix = nx.floyd_warshall_numpy(self.G)
-            self.index_to_name = dict(self.G.nodes(data="label"))
+            # weighted all-pairs distance keyed positionally (0..n-1), matching the
+            # order gudhi/matilda index the Rips simplices by. weight=self.weight_attr
+            # so genetic ("length") distances are used, not hop counts; graphs whose
+            # edges lack that attr (e.g. tree_main's merged_G) fall back to weight 1.
+            dist_matrix = nx.floyd_warshall_numpy(self.G, weight=self.weight_attr)
+            self.index_to_name = {
+                i: attrs.get("label", node)
+                for i, (node, attrs) in enumerate(self.G.nodes(data=True))
+            }
+            # main_result_analysis.read_index_to_name() reads this back to name simplices
+            with open(os.path.join(self.output_path, self.populated_header_fn), "w") as f:
+                f.write("\n".join(str(v) for v in self.index_to_name.values()))
+            np.savetxt(os.path.join(self.output_path, "populated_distance_matrix.txt"), dist_matrix)
         self.index_to_node = dict(enumerate(self.G.nodes()))
         dist_matrix = self.dress_distance_matrix_with_choice(dist_matrix, original_G)
 
@@ -232,7 +249,6 @@ class CycleFinder:
         self.cycle_log = hc.log
 
         if self.vis:
-            print(self.index_to_name)
             self._visualize()
 
         self._write_log()

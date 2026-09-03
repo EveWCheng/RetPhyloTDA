@@ -112,7 +112,7 @@ def read_reticulate_edges_by_name(sim_id):
 
 
 def read_network_graph(sim_id):
-    """Undirected nx.Graph from simN_filtered_edges.csv (tree + reticulation edges), weight 'length', edges carry 'edge_type' -- the graph the dressed tip-tip cells are shortest paths on."""
+    """Undirected graph from simN_filtered_edges.csv. Edges carry 'length' and 'edge_type'. Nodes carry 'is_leaf'. Dressed tip-tip cells are shortest paths on it."""
     path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_filtered_edges.csv")
     if not os.path.exists(path):
         return None
@@ -123,69 +123,95 @@ def read_network_graph(sim_id):
             if G.has_edge(u, v) and G.edges[u, v]["length"] <= length:
                 continue
             G.add_edge(u, v, length=length, edge_type=row["edge_type"])
+    leaf_labels = read_leaf_labels(sim_id) or set()
+    for node in G.nodes:
+        G.nodes[node]["is_leaf"] = node in leaf_labels
     return G
 
 
 def reticulate_edge_shortening(sim_id):
-    """{frozenset({label_u, label_v}): (n_pairs, max_shortening)} over the dressed tip pairs whose shortest path crosses each reticulate edge."""
+    """Maps each reticulate edge to (n_pairs, max_shortening, max_pair). max_pair is the (i, j) tip pair that hit max_shortening."""
     log_path = os.path.join(PROC_OUTPUTS_DIR, f"sim{sim_id}", "find_cycles_log.json")
     retic_edges = read_reticulate_edges_by_name(sim_id)
     if not os.path.exists(log_path) or retic_edges is None:
         return None
     with open(log_path) as f:
         entries = json.load(f).get("dress_distance_matrix", [])
-    result = {frozenset(edge[:2]): (0, 0.0) for edge in retic_edges}
+    result = {frozenset(edge[:2]): (0, 0.0, None) for edge in retic_edges}
     for entry in entries:
         ratio = entry["ratio"]
         if ratio is None:
             continue
+        pair = (entry["i"], entry["j"])
         for retic in entry.get("reticulation_edges_on_path", []):
             key = frozenset(retic["edge"])
-            n_pairs, max_shortening = result[key]
-            result[key] = (n_pairs + 1, min(max_shortening, ratio))
+            n_pairs, max_shortening, max_pair = result[key]
+            if ratio < max_shortening:
+                result[key] = (n_pairs + 1, ratio, pair)
+            else:
+                result[key] = (n_pairs + 1, max_shortening, max_pair)
     return result
 
 
 def reticulate_edge_table_lines(retic_edges, shortening, reticulation_on_paths):
-    """Report table: every reticulate edge with n_pairs, max_shortening, inher_weight, and whether it lies on a cycle closing-edge path."""
+    """Report table rows for every reticulate edge. Columns: n_pairs, max_shortening, max_shortening_pair, inher_weight, on_closing_path."""
     if shortening is None:
         return ["reticulate-edge table: no find_cycles log"]
     lines = [
         "reticulate-edge table:",
-        f"  {'edge':<22}{'n_pairs':>9}{'max_shortening':>16}{'inher_weight':>14}{'on_closing_path':>17}",
+        f"  {'edge':<22}{'n_pairs':>9}{'max_shortening':>16}{'max_shortening_pair':>24}{'inher_weight':>14}{'on_closing_path':>17}",
     ]
     rows = []
     for u, v, inher in retic_edges:
         key = frozenset((u, v))
-        n_pairs, max_shortening = shortening.get(key, (0, 0.0))
-        rows.append((f"{u} -- {v}", n_pairs, max_shortening, inher, key in reticulation_on_paths))
-    for name, n_pairs, max_shortening, inher, on_path in sorted(rows, key=lambda r: r[2]):
+        n_pairs, max_shortening, max_pair = shortening.get(key, (0, 0.0, None))
+        pair_str = f"{max_pair[0]} -- {max_pair[1]}" if max_pair else "-"
+        rows.append((f"{u} -- {v}", n_pairs, max_shortening, pair_str, inher, key in reticulation_on_paths))
+    for name, n_pairs, max_shortening, pair_str, inher, on_path in sorted(rows, key=lambda r: r[2]):
         inher_str = f"{inher:.4f}" if inher is not None else "None"
-        lines.append(f"  {name:<22}{n_pairs:>9}{max_shortening:>16.6f}{inher_str:>14}{str(on_path):>17}")
+        lines.append(f"  {name:<22}{n_pairs:>9}{max_shortening:>16.6f}{pair_str:>24}{inher_str:>14}{str(on_path):>17}")
     return lines
 
 
-def top_cycle_edge_paths(sim_id, cycles, top_k):
-    """Per cycle, up to top_k dicts {edge, weight, path} for the largest-|weight| edges; path is the shortest network path's (a, b, edge_type, length) edges, or None if an endpoint is off-graph."""
+def shortest_path_edges(net, u, v):
+    """Edges on any shortest u<->v path, as (a, b, edge_type, length). Undirected, weight 'length'. Returns None if unreachable. Shortest paths are often non-unique here. That is because net has length=0.0 edges. A single nx.shortest_path would miss reticulations on tied routes."""
+    if not nx.has_path(net, u, v):
+        return None
+    seen = set()
+    out = []
+    for path in nx.all_shortest_paths(net, u, v, weight="length"):
+        for a, b in nx.utils.pairwise(path):
+            key = frozenset((a, b))
+            if key not in seen:
+                seen.add(key)
+                out.append((a, b, net.edges[a, b]["edge_type"], net.edges[a, b]["length"]))
+    return out
+
+
+def top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only):
+    """Per cycle, dicts {edge, weight, path} for top-ranked cycle edges. Ranks by |weight|, keeps top_k plus ties. Only leaf-to-leaf edges when tip_to_tip_only. path lists edges on any shortest network route. path is None if an endpoint is off-graph."""
     net = read_network_graph(sim_id)
     result = []
     for cycle in cycles:
-        ranked = sorted(cycle["edges"], key=lambda e: abs(e["weight"]), reverse=True)
+        edges = cycle["edges"]
+        if tip_to_tip_only and net is not None:
+            edges = [e for e in edges if all(n in net and net.nodes[n]["is_leaf"] for n in e["nodes"])]
+        ranked = sorted(edges, key=lambda e: abs(e["weight"]), reverse=True)
+        cutoff = abs(ranked[top_k - 1]["weight"]) if len(ranked) >= top_k else 0.0
         entries = []
-        for edge in ranked[:top_k]:
+        for edge in [e for e in ranked if abs(e["weight"]) >= cutoff]:
             u, v = edge["nodes"]
             if net is None or u not in net or v not in net:
                 path = None
             else:
-                nodes = nx.shortest_path(net, u, v, weight="length")
-                path = [(a, b, net.edges[a, b]["edge_type"], net.edges[a, b]["length"]) for a, b in nx.utils.pairwise(nodes)]
+                path = shortest_path_edges(net, u, v)
             entries.append({"edge": (u, v), "weight": edge["weight"], "path": path})
         result.append(entries)
     return result
 
 
 def _rank_cycle_edges(cycle):
-    """rank/closing-flag lookup by appears_at, shared by reticulate/tip edge reporting."""
+    """Rank and closing-flag lookup keyed by appears_at. Shared by reticulate and tip edge reporting."""
     distinct = sorted({edge["appears_at"] for edge in cycle["edges"]})
     rank = {t: r for r, t in enumerate(distinct, start=1)}
     last = distinct[-1] if distinct else None
@@ -217,15 +243,16 @@ def reticulate_edges_per_cycle(cycles, retic_edges):
 
 
 def read_leaf_labels(sim_id):
+    """Labels of current tips from simN_nodes.csv. Uses live is_leaf, not the sticky 'type' category."""
     path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_nodes.csv")
     if not os.path.exists(path):
         return None
     with open(path, newline="") as f:
-        return {row["label"] for row in csv.DictReader(f) if row["type"] in ("leaf", "hyb_leaf")}
+        return {row["label"] for row in csv.DictReader(f) if row["is_leaf"] == "True"}
 
 
 def tip_edges_per_cycle(cycles, leaf_labels):
-    """edges within each cycle whose both endpoints are leaves (is_leaf), i.e. tip-to-tip edges."""
+    """Edges within each cycle whose both endpoints are leaves. These are the tip-to-tip edges."""
     if cycles is None or leaf_labels is None:
         return None
     result = []
@@ -248,7 +275,7 @@ def tip_edges_per_cycle(cycles, leaf_labels):
     return result
 
 
-def write_sim_report(sim_id, top_k):
+def write_sim_report(sim_id, top_k, tip_to_tip_only):
     retic_edges = read_reticulate_edges_by_name(sim_id)
     cycles = read_cycles_by_name(sim_id)
     found_per_cycle = reticulate_edges_per_cycle(cycles, retic_edges)
@@ -295,9 +322,9 @@ def write_sim_report(sim_id, top_k):
         lines.append(f"dress_distance_matrix change ratios (new_dist - old_dist) / old_dist ({len(dress_ratios)}):")
         lines.append(f"  median={median}  max={dress_max}  min={dress_min}")
 
-    top_paths = top_cycle_edge_paths(sim_id, cycles, top_k)
+    top_paths = top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only)
     lines.append("")
-    lines.append(f"top-{top_k} cycle-edge shortest paths (network incl. reticulation edges, weight=length):")
+    lines.append(f"top-{top_k} cycle-edge shortest paths (all edges on any co-shortest network path, incl. reticulation edges, weight=length):")
     for i, entries in enumerate(top_paths):
         if not entries:
             lines.append(f"  cycle {i}: no nonzero edges")
@@ -342,7 +369,7 @@ def write_sim_report(sim_id, top_k):
 
 
 def read_dress_change_ratios(sim_id):
-    """Dressed (new_dist - old_dist) / old_dist ratios from simN find_cycles_log.json (old_dist == 0 cells are stored as None and skipped)."""
+    """Dressed (new_dist - old_dist) / old_dist ratios from find_cycles_log.json. Cells with old_dist 0 are stored None and skipped."""
     path = os.path.join(PROC_OUTPUTS_DIR, f"sim{sim_id}", "find_cycles_log.json")
     if not os.path.exists(path):
         return None
@@ -373,11 +400,13 @@ def summarize_dress_change_ratios(sim_ids=None):
 
 
 def main():
-    # per cycle, how many largest-|harmonic weight| edges to trace shortest paths for (1 = closing edge only; 5 added no extra reticulations)
-    top_k = 1
+    # largest-|weight| cycle edges to trace paths for, per cycle.
+    top_k = 3
+    # rank only leaf-to-leaf cycle edges. Internal or phantom endpoints are possible.
+    tip_to_tip_only = True
     sim_ids = discover_sim_ids()
     for sim_id in sim_ids:
-        path = write_sim_report(sim_id, top_k)
+        path = write_sim_report(sim_id, top_k, tip_to_tip_only)
         print(f"sim{sim_id}: wrote {path}")
 
 
