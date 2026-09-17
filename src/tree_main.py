@@ -42,14 +42,14 @@ MIN_CYCLE_LENGTH = 4
 # cap on how many qualifying cycles get rendered as HTML; None means render all of them
 MAX_PLOT_CYCLES = 30
 # number of gene trees to simulate
-Ngene = 2
+Ngene = 200
 # trait evolution model (none used)
 TRAIT_MODEL = None
 # number of gene-tree samples to enumerate, "all" or an integer -- "all" enumerates
 # the full cartesian product of reticulate-node choices (2^(number of reticulation
 # events)), which grows exponentially with tree size and can blow up long before
 # STOPPING_NUM_LEAVES gets large
-N_SAMPLES = 500
+N_SAMPLES = Ngene
 # fixed thresholds to plot cycles at; set to None to derive thresholds dynamically via THRESHOLD_MODE instead
 THRESHOLDS = [1]
 # threshold-selection strategies CycleFinder runs per cycle

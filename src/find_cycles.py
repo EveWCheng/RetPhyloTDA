@@ -370,32 +370,7 @@ class CycleFinder:
                     to_delete.add(other_edge)
         counts = {e: c for e, c in cumulative_counts.items() if e not in to_delete}
 
-        # complementary split -- disabled for now
-        # seen = set()
-        # to_delete = set()
-        # cumulative_counts = copy.deepcopy(counts)
-        # for edge in counts:
-        #     if edge in seen:
-        #         continue
-        #     p1, p2 = tuple(edge)
-        #     if len(p1) == len(p2):
-        #         continue
-        #     short, long_ = (p1, p2) if len(p1) < len(p2) else (p2, p1)
-        #     complement = tuple(sorted(set(long_) - set(short)))
-        #     candidate = frozenset({complement, long_})
-        #     if candidate in counts and candidate not in seen:
-        #         cumulative_counts[edge] += counts[candidate]
-        #         to_delete.add(candidate)
-        #         seen.add(edge)
-        #         seen.add(candidate)
-        # counts = {e: c for e, c in cumulative_counts.items() if e not in to_delete}
-
-        # keep only edges that share a point with at least one other edge --
-        # a point with no competing resolution is not a reticulation signal
-
-        # step 1: group all edges by point. usually that's just the shorter of
-        # an edge's two points, but if both points are the same length (no
-        # single "short" one), index the edge under both of them
+       # step 1: group all edges by point. usually that's just the shorter of an edge's two points, but if both points are the same length (no single "short" one), index the edge under both of them
         edges_by_point = {}
         for edge in counts:
             point_a, point_b = tuple(edge)
@@ -472,10 +447,6 @@ class CycleFinder:
                             only_b += 1
                         else:
                             neither += 1
-                    # a candidate pair only survives if the two sides split
-                    # the trees evenly (only_a == only_b)
-                    if only_a != only_b:
-                        continue
 
                     f.write(
                         f"{labeled(shared_point)}: {labeled(parent_a)} -- {labeled(parent_b)} "

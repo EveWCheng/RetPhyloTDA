@@ -1,4 +1,4 @@
-***2026-08-31 — Which reticulations a TDA-detected cycle captures, and why some strong ones are missed
+***DATE 2026-08-31 — Which reticulations a TDA-detected cycle captures, and why some strong ones are missed
 
 ## What we did
 
@@ -275,7 +275,7 @@ the same sequences, and reticulations bias that estimate toward smaller
 divergences, so the observed shortening is attenuated below the true value
 (affects any tree-differencing method, not just this one).
 
-***2026-09-03 — Recovering known reticulations from `tree_main.py`'s merged gene trees, and how much of that is actually TDA
+***DATE 2026-09-03 — Recovering known reticulations from `tree_main.py`'s merged gene trees, and how much of that is actually TDA
 
 ## What we did
 
@@ -386,17 +386,6 @@ only `total/2^k` trees. This cleanly separates real single-choice splits
 First pass (no filtering): 74 lines, all 3 events in the top ~20, but mixed
 with composite noise even there.
 
-## Comparison
-
-Once `tree_by_tree_delete` got the complementary-split merge-and-delete step,
-it beat `polymorphic_edges` outright on this network: **9–10 lines, zero
-composite noise**, vs. `polymorphic_edges`' 74 lines with noise mixed into the
-top tier. Tradeoff: merging each complementary pair into one winning entry
-loses the "how contested" signal (`polymorphic_edges`' raw `4/7` vs `3/7`
-told you how close the two resolutions were; the merged TDA output only shows
-one consolidated count).
-
-
 
 ## Follow-up: reticulate-edge pairing, and TDA still isn't earning its keep
 
@@ -418,3 +407,41 @@ any nested hybrid-on-hybrid signal it might represent. Real edge lengths +
 multi-scale persistence could instead let nested reticulations surface as
 separate cycles at different filtration thresholds, with nothing deleted.
 Untested: no nested case in current network; still single-threshold.
+
+***DATE 2026-09-10 — `Ngene` was reshuffling the simulated network; the `only_a==only_b` filter doesn't survive scrutiny
+
+## Bug: `Ngene` perturbed the shared RNG stream
+
+`_hyb_setup`'s per-locus gene-split draws (`np.random.binomial`/`choice`, size scales
+with `Ngene`) consumed part of the same sequential `np.random` stream that event
+timing/type/species-choice also read from — so changing `Ngene` silently resimulated a
+different network, even same seed (verified: `hyb_events` = 20/21/17 for
+`Ngene=150/151/300`). **Fix (`sim_bdh.py`):** gave `SimState` its own private RNG for
+these draws (seeded once at construction, fixed cost). Verified byte-identical networks
+across `Ngene` values afterward. Also set `N_SAMPLES = Ngene` in `tree_main.py`
+(was a disconnected hardcoded `500`) — matches the R original's `Ngene` semantics.
+
+## Synced `polymorphic_edges.py` and `find_cycles.py`, again
+
+They'd drifted since 2026-09-03: complementary-split was disabled in one but not the
+other (now disabled in both); `polymorphic_edges()` was missing `tree_by_tree_delete`'s
+"drop edges with no competing point" filter (added). Re-verified exact-match output on
+real runs.
+
+## `only_a == only_b` doesn't hold up
+
+Sweeping `Ngene` 300→8192 on an 11-reticulation network, detected-event count
+fluctuated (1–3/11) with no convergence — because `hyb_inher_fxn` draws inheritance
+uniformly, so most true events are lopsided, not 50/50; more sampling pushes a lopsided
+event's count *away* from an exact tie, not toward one. Removed the `only_a != only_b`
+gate from both files — now stable at 6/11 across all sample sizes, same 5 missing
+every time (non-leaf hybrid nodes, invisible to any bipartition method).
+
+## Open question
+
+Manually hunted for a cleanup rule in the raw polymorphic-edges output (connected
+components, complementary-pair filtering) — nothing discriminated real signal from
+noise further. Likely needs branch lengths (unused `length` attrs), not more topology
+heuristics.
+
+

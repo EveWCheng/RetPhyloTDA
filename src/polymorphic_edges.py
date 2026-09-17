@@ -9,8 +9,6 @@ from itertools import combinations
 
 
 def _tree_edge_set(tree):
-    # networkx_to_tree_json already rewrote every node's "label" to the
-    # leaf-label tuple for its clade
     return {
         frozenset({tuple(tree.nodes[u]["label"]), tuple(tree.nodes[v]["label"])})
         for u, v in tree.edges()
@@ -38,49 +36,35 @@ def _ranked_by_inclusion(counts):
 
 
 def polymorphic_edges(enumerate_trees, leaf_labels=None):
-    """Edges present in some but not all of the distinct resolved trees --
-    i.e. edges that depend on a reticulation choice, as opposed to backbone
-    edges (present in every tree) or one-off combinatorial noise (present in
-    only one tree). Counted by distinct tree, not by sample count.
-
-    Same two post-processing boosts as CycleFinder.tree_by_tree_delete
-    (find_cycles.py): ranked-by-inclusion and complementary-split, each
-    merging an edge's count into the more informative partner and deleting
-    the absorbed one. Returns a list of (names, count, total) sorted by count
-    descending -- count is post-boost, so it is no longer literally "out of
-    total" the way the raw per-tree count was."""
     total = len(enumerate_trees)
     edge_tree_counts = Counter()
     for tree in enumerate_trees:
         edge_tree_counts.update(_tree_edge_set(tree))
 
-    # drop universal backbone edges (present in every tree) before boosting
     counts = {edge: count for edge, count in edge_tree_counts.items() if count != total}
 
     counts = _ranked_by_inclusion(counts)
 
-    # complementary split: for an edge with a shorter and a longer point, if
-    # the edge {complement of shorter within longer, longer} also exists, the
-    # two are alternative resolutions of the same split -- merge into one
-    # entry, keeping only the (now-boosted) higher count
-    seen = set()
-    to_delete = set()
-    cumulative_counts = dict(counts)
+    edges_by_point = {}
     for edge in counts:
-        if edge in seen:
-            continue
-        p1, p2 = tuple(edge)
-        if len(p1) == len(p2):
-            continue
-        short, long_ = (p1, p2) if len(p1) < len(p2) else (p2, p1)
-        complement = tuple(sorted(set(long_) - set(short)))
-        candidate = frozenset({complement, long_})
-        if candidate in counts and candidate not in seen:
-            cumulative_counts[edge] += counts[candidate]
-            to_delete.add(candidate)
-            seen.add(edge)
-            seen.add(candidate)
-    counts = {e: c for e, c in cumulative_counts.items() if e not in to_delete}
+        point_a, point_b = tuple(edge)
+        if len(point_a) < len(point_b):
+            grouping_points = [point_a]
+        elif len(point_b) < len(point_a):
+            grouping_points = [point_b]
+        else:
+            grouping_points = [point_a, point_b]
+        for point in grouping_points:
+            if point not in edges_by_point:
+                edges_by_point[point] = []
+            edges_by_point[point].append(edge)
+
+    edges_to_keep = set()
+    for point, edges in edges_by_point.items():
+        if len(edges) > 1:
+            for edge in edges:
+                edges_to_keep.add(edge)
+    counts = {edge: count for edge, count in counts.items() if edge in edges_to_keep}
 
     leaf_labels = leaf_labels or {}
     results = []
@@ -115,9 +99,6 @@ def reticulate_edges(enumerate_trees, leaf_labels=None):
     total = len(enumerate_trees)
     tree_edge_sets = [_tree_edge_set(tree) for tree in enumerate_trees]
 
-    # candidate edges: every edge seen in some but not all distinct trees,
-    # then consolidated by the same ranked-by-inclusion step tree_by_tree_delete
-    # uses, so the two methods start from a comparable candidate pool
     edge_tree_counts = Counter()
     for tree_edges in tree_edge_sets:
         edge_tree_counts.update(tree_edges)
@@ -125,8 +106,6 @@ def reticulate_edges(enumerate_trees, leaf_labels=None):
     counts = _ranked_by_inclusion(counts)
     candidate_edges = list(counts)
 
-    # group candidate edges by their short point (both points, if they're
-    # the same length and there's no single "short" one)
     edges_by_point = {}
     for edge in candidate_edges:
         point_a, point_b = tuple(edge)
@@ -171,8 +150,6 @@ def reticulate_edges(enumerate_trees, leaf_labels=None):
                     only_b += 1
                 else:
                     neither += 1
-            if only_a != only_b:
-                continue
 
             results.append((labeled(shared_point), labeled(parent_a), labeled(parent_b), only_a, only_b, neither))
     return results

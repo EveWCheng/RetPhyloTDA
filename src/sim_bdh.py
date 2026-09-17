@@ -90,6 +90,10 @@ class SimState:
         self.tree_extinct = False
         self.Ngene = Ngene
         self.trait_model = trait_model
+        # separate RNG stream for per-locus gene-split draws (_hyb_setup), so their
+        # Ngene-dependent consumption doesn't shift the shared np.random stream that
+        # the rest of the simulation (event timing/type/species choice) draws from
+        self._gene_rng = np.random.default_rng(np.random.randint(2**32))
 
         self.leaves: set[int] = set()   # IDs of currently active leaves
         self._id = 0   # node ID counter; increments with every new node
@@ -193,8 +197,8 @@ class SimState:
                 parent_of_primary = parent
 
         if self.Ngene > 0:
-            k = np.random.binomial(self.Ngene, primary_inher)
-            primary_genes = set(np.random.choice(self.Ngene, k, replace=False))
+            k = self._gene_rng.binomial(self.Ngene, primary_inher)
+            primary_genes = set(self._gene_rng.choice(self.Ngene, k, replace=False))
             secondary_genes = set(range(self.Ngene)) - primary_genes
         else:
             primary_genes = set()
