@@ -98,6 +98,12 @@ class SimState:
         self.leaves: set[int] = set()   # IDs of currently active leaves
         self._id = 0   # node ID counter; increments with every new node
 
+        # Live pairwise distance matrix between currently active leaves, keyed by node id.
+        # Maintained incrementally event-by-event (mirrors the R port's genetic_dists):
+        # grown by 2*timestep for every pair on every Gillespie step, and rewritten only
+        # for entries touching newly created/retired leaves. Never recomputed from G.
+        self.distance: dict[int, dict[int, float]] = {}
+
         if trait_model is not None:
             missing = TRAIT_MODEL_KEYS - trait_model.keys()
             if missing:
@@ -111,6 +117,7 @@ class SimState:
         leaf1 = self._new_node(is_leaf=True)
         self.G.add_edge(root, leaf1, edge_type='tree', length=0.0, time_length=0.0, genes=set(range(Ngene)))
         self.leaves.add(leaf1)
+        self.distance[leaf1] = {leaf1: 0.0}
         if trait_model is not None:
             self.G.nodes[leaf1]['trait'] = trait_model['initial'][0]
 
@@ -118,6 +125,9 @@ class SimState:
             leaf2 = self._new_node(is_leaf=True)
             self.G.add_edge(root, leaf2, edge_type='tree', length=0.0, time_length=0.0, genes=set(range(Ngene)))
             self.leaves.add(leaf2)
+            self.distance[leaf2] = {leaf2: 0.0}
+            self.distance[leaf1][leaf2] = 0.0
+            self.distance[leaf2][leaf1] = 0.0
             if trait_model is not None:
                 self.G.nodes[leaf2]['trait'] = trait_model['initial'][1]
 
@@ -146,6 +156,45 @@ class SimState:
         self.G.nodes[node]['is_leaf'] = False
         return parent
 
+    def _drop_distance(self, old: int):
+        row = self.distance.pop(old, None)
+        if row is None:
+            return
+        row.pop(old, None)
+        for k in row:
+            self.distance.get(k, {}).pop(old, None)
+
+    def _rename_distance(self, old: int, new: int):
+        row = self.distance.pop(old)
+        del row[old]
+        row[new] = 0.0
+        self.distance[new] = row
+        for k, v in row.items():
+            if k != new:
+                del self.distance[k][old]
+                self.distance[k][new] = v
+
+    def _split_distance(self, old: int, new1: int, new2: int):
+        row = self.distance.pop(old)
+        del row[old]
+        for new in (new1, new2):
+            self.distance[new] = dict(row)
+            self.distance[new][new1] = 0.0
+            self.distance[new][new2] = 0.0
+        for k, v in row.items():
+            del self.distance[k][old]
+            self.distance[k][new1] = v
+            self.distance[k][new2] = v
+
+    def _blend_distance(self, primary: int, secondary: int, new: int, primary_inher: float, secondary_inher: float):
+        row_p, row_s = self.distance[primary], self.distance[secondary]
+        blended = {k: primary_inher * row_p[k] + secondary_inher * row_s[k] for k in row_p}
+        blended[new] = 0.0
+        self.distance[new] = blended
+        for k, v in blended.items():
+            if k != new:
+                self.distance[k][new] = v
+
     def speciation(self, species: int):
         self._seal_incoming(species)
         self.leaves.discard(species)
@@ -156,6 +205,7 @@ class SimState:
         self.G.add_edge(species, child1, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
         self.G.add_edge(species, child2, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
         self.leaves.update({child1, child2})
+        self._split_distance(species, child1, child2)
 
         if self.trait_model is not None:
             child1_trait, child2_trait = self.trait_model['spec_fxn'](self.G.nodes[species]['trait'])
@@ -166,23 +216,17 @@ class SimState:
         self._seal_incoming(species)
         self.G.nodes[species]['extinct'] = True
         self.leaves.discard(species)
+        self._drop_distance(species)
 
-    def _edge_length(self, u: int, v: int) -> float:
-        stored = self.G[u][v]["length"]
-        if stored == 0.0 and v in self.leaves:
-            return self.time - self.G.nodes[v]['timecreation']
-        return stored
-
-    def tip_distance(self, tip1: int, tip2: int) -> float:
-        """Current distance between two active leaves, via minimum-weight path.
-        """
-        live = nx.Graph()
-        for u, v in self.G.edges():
-            live.add_edge(u, v, length=self._edge_length(u, v))
-        return nx.shortest_path_length(live, tip1, tip2, weight="length")
+    def _advance_distance(self, timestep: float):
+        for i in self.leaves:
+            row = self.distance[i]
+            for j in self.leaves:
+                if i != j:
+                    row[j] += 2 * timestep
 
     def _hyb_setup(self, sp1: int, sp2: int, inher: float, d12: float | None = None):
-        d12 = d12 if d12 is not None else self.tip_distance(sp1, sp2)
+        d12 = d12 if d12 is not None else self.distance[sp1][sp2]
 
         primary   = sp1 if (1 - inher) > 0.5 else sp2
         secondary = sp2 if primary == sp1 else sp1
@@ -228,6 +272,10 @@ class SimState:
         self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.update({leaf_p, leaf_s, hyb_leaf})
 
+        self._blend_distance(primary, secondary, hyb_leaf, primary_inher, secondary_inher)
+        self._rename_distance(sp1, leaf_p)
+        self._rename_distance(sp2, leaf_s)
+
         if self.trait_model is not None:
             self.G.nodes[leaf_p]['trait'] = sp1_trait
             self.G.nodes[leaf_s]['trait'] = sp2_trait
@@ -247,6 +295,10 @@ class SimState:
         self.G.nodes[primary]['is_hyb_node'] = True
         self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.add(hyb_leaf)
+
+        self._blend_distance(primary, secondary, hyb_leaf, primary_inher, secondary_inher)
+        self._drop_distance(primary)
+        self._drop_distance(secondary)
 
         if self.trait_model is not None:
             self.G.nodes[hyb_leaf]['trait'] = hyb_trait
@@ -271,6 +323,10 @@ class SimState:
         self.G.nodes[primary]['is_hyb_node'] = True
         self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.update({hyb_leaf, donor_leaf})
+
+        self._blend_distance(primary, secondary, hyb_leaf, primary_inher, secondary_inher)
+        self._rename_distance(secondary, donor_leaf)
+        self._drop_distance(primary)
 
         if self.trait_model is not None:
             self.G.nodes[hyb_leaf]['trait'] = hyb_trait
@@ -302,11 +358,11 @@ class SimParams:
 
 
 def _sim_one(state: SimState, params: SimParams) -> dict:
-    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict, time_distance: dict}."""
+    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict, distance_hybrid: dict}."""
     while True:
         n = len(state.leaves)
         if n == 0:
-            return {'phy': 0, 'distance': None, 'time_distance': None}
+            return {'phy': 0, 'distance': None, 'distance_hybrid': None}
         if params.stopping_num_leaves is not None and n >= params.stopping_num_leaves:
             break
 
@@ -319,8 +375,11 @@ def _sim_one(state: SimState, params: SimParams) -> dict:
         state.time    += state.timestep
 
         if state.time >= params.age:
+            state._advance_distance(params.age - (state.time - state.timestep))
             state.time = params.age
             break
+
+        state._advance_distance(state.timestep)
 
         if state.trait_model is not None:
             state._evolve_traits(state.timestep)
@@ -356,7 +415,7 @@ def _try_hybridization(state: SimState, sp1, params: SimParams):
             return
 
     if params.hyb_rate_fxn is not None:
-        d12 = state.tip_distance(sp1, sp2)
+        d12 = state.distance[sp1][sp2]
         if np.random.uniform() > params.hyb_rate_fxn(d12):
             return
 
@@ -480,7 +539,15 @@ def _build_output(state: SimState):
         nleaves=len(state.leaves),
         tip_states=tip_states,
     )
-    distance = dict(nx.all_pairs_dijkstra_path_length(state.G.to_undirected(),weight='length'))
-    time_distance = dict(nx.all_pairs_dijkstra_path_length(state.G.to_undirected(),weight='time_length'))
 
-    return {'phy': phy, 'distance': distance, 'time_distance': time_distance}
+    tree_only = state.G.edge_subgraph(
+        [(u, v) for u, v, edge_type in state.G.edges(data='edge_type') if edge_type != 'reticulation']
+    )
+    distance = dict(nx.all_pairs_dijkstra_path_length(tree_only.to_undirected(), weight='length'))
+
+    distance_hybrid = {i: dict(row) for i, row in distance.items()}
+    for i, row in state.distance.items():
+        for j, d in row.items():
+            distance_hybrid[i][j] = d
+
+    return {'phy': phy, 'distance': distance, 'distance_hybrid': distance_hybrid}
