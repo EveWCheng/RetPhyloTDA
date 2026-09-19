@@ -3,11 +3,10 @@ import json
 import math
 import os
 import re
-import statistics
 
 import networkx as nx
 
-from main import PHYLO_CSV_DIR, SIM_OUTPUTS_DIR
+from sim_main import PHYLO_CSV_DIR, SIM_OUTPUTS_DIR
 
 PROC_OUTPUTS_DIR = os.path.join(SIM_OUTPUTS_DIR, "proc_phylo_outputs")
 CYCLE_OUTPUTS_DIR = os.path.join(SIM_OUTPUTS_DIR, "cycle_outputs")
@@ -110,7 +109,7 @@ def read_reticulate_edges_by_name(sim_id):
             if row["edge_type"] == "reticulation"
         ]
 
-
+ 
 def read_network_graph(sim_id):
     """Undirected graph from simN_filtered_edges.csv. Edges carry 'length' and 'edge_type'. Nodes carry 'is_leaf'. Dressed tip-tip cells are shortest paths on it."""
     path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_filtered_edges.csv")
@@ -127,50 +126,6 @@ def read_network_graph(sim_id):
     for node in G.nodes:
         G.nodes[node]["is_leaf"] = node in leaf_labels
     return G
-
-
-def reticulate_edge_shortening(sim_id):
-    """Maps each reticulate edge to (n_pairs, max_shortening, max_pair). max_pair is the (i, j) tip pair that hit max_shortening."""
-    log_path = os.path.join(PROC_OUTPUTS_DIR, f"sim{sim_id}", "find_cycles_log.json")
-    retic_edges = read_reticulate_edges_by_name(sim_id)
-    if not os.path.exists(log_path) or retic_edges is None:
-        return None
-    with open(log_path) as f:
-        entries = json.load(f).get("dress_distance_matrix", [])
-    result = {frozenset(edge[:2]): (0, 0.0, None) for edge in retic_edges}
-    for entry in entries:
-        ratio = entry["ratio"]
-        if ratio is None:
-            continue
-        pair = (entry["i"], entry["j"])
-        for retic in entry.get("reticulation_edges_on_path", []):
-            key = frozenset(retic["edge"])
-            n_pairs, max_shortening, max_pair = result[key]
-            if ratio < max_shortening:
-                result[key] = (n_pairs + 1, ratio, pair)
-            else:
-                result[key] = (n_pairs + 1, max_shortening, max_pair)
-    return result
-
-
-def reticulate_edge_table_lines(retic_edges, shortening, reticulation_on_paths):
-    """Report table rows for every reticulate edge. Columns: n_pairs, max_shortening, max_shortening_pair, inher_weight, on_closing_path."""
-    if shortening is None:
-        return ["reticulate-edge table: no find_cycles log"]
-    lines = [
-        "reticulate-edge table:",
-        f"  {'edge':<22}{'n_pairs':>9}{'max_shortening':>16}{'max_shortening_pair':>24}{'inher_weight':>14}{'on_closing_path':>17}",
-    ]
-    rows = []
-    for u, v, inher in retic_edges:
-        key = frozenset((u, v))
-        n_pairs, max_shortening, max_pair = shortening.get(key, (0, 0.0, None))
-        pair_str = f"{max_pair[0]} -- {max_pair[1]}" if max_pair else "-"
-        rows.append((f"{u} -- {v}", n_pairs, max_shortening, pair_str, inher, key in reticulation_on_paths))
-    for name, n_pairs, max_shortening, pair_str, inher, on_path in sorted(rows, key=lambda r: r[2]):
-        inher_str = f"{inher:.4f}" if inher is not None else "None"
-        lines.append(f"  {name:<22}{n_pairs:>9}{max_shortening:>16.6f}{pair_str:>24}{inher_str:>14}{str(on_path):>17}")
-    return lines
 
 
 def shortest_path_edges(net, u, v):
@@ -243,8 +198,8 @@ def reticulate_edges_per_cycle(cycles, retic_edges):
 
 
 def read_leaf_labels(sim_id):
-    """Labels of current tips from simN_nodes.csv. Uses live is_leaf, not the sticky 'type' category."""
-    path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_nodes.csv")
+    """Labels of current tips from simN_filtered_nodes.csv. Uses live is_leaf, not the sticky 'type' category."""
+    path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_filtered_nodes.csv")
     if not os.path.exists(path):
         return None
     with open(path, newline="") as f:
@@ -311,17 +266,6 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only):
                 f"rank={edge['rank']}/{edge['num_distinct_appears_at']}{closing_flag}"
             )
 
-    dress_ratios = read_dress_change_ratios(sim_id)
-    lines.append("")
-    if dress_ratios is None:
-        lines.append("dress_distance_matrix change ratios (new_dist - old_dist) / old_dist: no log")
-    else:
-        median = statistics.median(dress_ratios) if dress_ratios else None
-        dress_max = max(dress_ratios) if dress_ratios else None
-        dress_min = min(dress_ratios) if dress_ratios else None
-        lines.append(f"dress_distance_matrix change ratios (new_dist - old_dist) / old_dist ({len(dress_ratios)}):")
-        lines.append(f"  median={median}  max={dress_max}  min={dress_min}")
-
     top_paths = top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only)
     lines.append("")
     lines.append(f"top-{top_k} cycle-edge shortest paths (all edges on any co-shortest network path, incl. reticulation edges, weight=length):")
@@ -357,46 +301,12 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only):
     for edge in missing:
         lines.append(f"  {edge[0]} -- {edge[1]}  inher_weight={edge[2]}")
 
-    lines.append("")
-    lines.extend(reticulate_edge_table_lines(retic_edges, reticulate_edge_shortening(sim_id), reticulation_on_paths))
-
     os.makedirs(ANALYSIS_REPORTS_DIR, exist_ok=True)
     path = os.path.join(ANALYSIS_REPORTS_DIR, f"sim{sim_id}_analysis.txt")
     with open(path, "w") as f:
         for line in lines:
             f.write(line + "\n")
     return path
-
-
-def read_dress_change_ratios(sim_id):
-    """Dressed (new_dist - old_dist) / old_dist ratios from find_cycles_log.json. Cells with old_dist 0 are stored None and skipped."""
-    path = os.path.join(PROC_OUTPUTS_DIR, f"sim{sim_id}", "find_cycles_log.json")
-    if not os.path.exists(path):
-        return None
-    with open(path) as f:
-        data = json.load(f)
-    ratios = []
-    for entry in data.get("dress_distance_matrix", []):
-        if entry["ratio"] is not None:
-            ratios.append(entry["ratio"])
-    return ratios
-
-
-def summarize_dress_change_ratios(sim_ids=None):
-    """Aggregate read_dress_change_ratios across sims into {ratios, median, max, min}."""
-    if sim_ids is None:
-        sim_ids = discover_sim_ids()
-    ratios = []
-    for sim_id in sim_ids:
-        sim_ratios = read_dress_change_ratios(sim_id)
-        if sim_ratios:
-            ratios.extend(sim_ratios)
-    return {
-        "ratios": ratios,
-        "median": statistics.median(ratios) if ratios else None,
-        "max": max(ratios) if ratios else None,
-        "min": min(ratios) if ratios else None,
-    }
 
 
 def main():

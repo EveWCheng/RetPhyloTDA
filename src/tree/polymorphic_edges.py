@@ -94,7 +94,7 @@ def reticulate_edges(enumerate_trees, leaf_labels=None):
     only pairs where the parents split the distinct trees evenly (only_a ==
     only_b) -- the signature of a genuine binary reticulation choice, as
     opposed to an edge whose presence is entangled with some other choice.
-    Same technique as CycleFinder.tree_by_tree_delete's reticulate-edges
+    Same technique as TreeFilterCycle.tree_by_tree_delete's reticulate-edges
     step, but working entirely off enumerate_trees -- no cycle detection."""
     total = len(enumerate_trees)
     tree_edge_sets = [_tree_edge_set(tree) for tree in enumerate_trees]

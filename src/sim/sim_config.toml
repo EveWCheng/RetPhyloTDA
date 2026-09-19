@@ -1,0 +1,16 @@
+[sim]
+seed = 42
+which_nodes = "no_hyb_nodes"
+
+age = 10
+numbsim = 80
+
+# speciation
+lambda_ = 0.1
+mu = 0.1
+nu = 0.3
+hybprops = [1, 0, 0]   # [lineage generating, degenerative, neutral]
+
+stopping_num_leaves = 10  # each sim also stops once it reaches this many leaves
+min_cycle_length = 0
+weight_attr = "length"  # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time). Should always be length

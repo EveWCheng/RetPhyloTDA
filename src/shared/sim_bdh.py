@@ -234,11 +234,14 @@ class SimState:
         secondary_inher = 1 - primary_inher
 
         parent_of_primary = None
+        parent_of_secondary = None
         for sp in (sp1, sp2):
             parent = self._seal_incoming(sp)
             self.leaves.discard(sp)
             if sp == primary:
                 parent_of_primary = parent
+            else:
+                parent_of_secondary = parent
 
         if self.Ngene > 0:
             k = self._gene_rng.binomial(self.Ngene, primary_inher)
@@ -248,13 +251,13 @@ class SimState:
             primary_genes = set()
             secondary_genes = set()
 
-        return (primary, secondary, primary_inher, secondary_inher, d12,primary_genes, secondary_genes, parent_of_primary)
+        return (primary, secondary, primary_inher, secondary_inher, d12,primary_genes, secondary_genes, parent_of_primary, parent_of_secondary)
 
     def hyb_generating(self, sp1: int, sp2: int, inher: float, d12: float | None = None,hyb_trait=None):
         """LG: both parents continue; new hybrid node + leaf added."""
         if self.trait_model is not None:
             sp1_trait, sp2_trait = self.G.nodes[sp1]['trait'], self.G.nodes[sp2]['trait']
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, _ = self._hyb_setup(sp1, sp2, inher, d12)
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, _, _ = self._hyb_setup(sp1, sp2, inher, d12)
 
         leaf_p   = self._new_node(is_leaf=True)   # primary parent continuation
         leaf_s   = self._new_node(is_leaf=True)   # secondary parent continuation
@@ -284,7 +287,7 @@ class SimState:
     def hyb_degenerative(self, sp1: int, sp2: int, inher: float, d12: float | None = None,
                          hyb_trait=None):
         """LD: secondary parent absorbed; primary continues as the hybrid leaf."""
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = self._hyb_setup(sp1, sp2, inher, d12)
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary, _ = self._hyb_setup(sp1, sp2, inher, d12)
 
         hyb_leaf = self._new_node(is_leaf=True)
 
@@ -305,32 +308,32 @@ class SimState:
 
     def hyb_neutral(self, sp1: int, sp2: int, inher: float, d12: float | None = None,
                     hyb_trait=None):
-        """LN: both parents continue; primary's lineage carries the hybrid genome."""
-        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, parent_of_primary = self._hyb_setup(sp1, sp2, inher, d12)
+        """LN: both parents continue; secondary's lineage (the lower-inheritance one) carries the hybrid genome."""
+        primary, secondary, primary_inher, secondary_inher, d12, primary_genes, secondary_genes, _, parent_of_secondary = self._hyb_setup(sp1, sp2, inher, d12)
 
         if self.trait_model is not None:
-            secondary_trait = self.G.nodes[secondary]['trait']
+            primary_trait = self.G.nodes[primary]['trait']
 
-        hyb_leaf   = self._new_node(is_leaf=True)  # primary continuation (hybrid genome)
-        donor_leaf = self._new_node(is_leaf=True)  # secondary continuation (unchanged)
+        hyb_leaf   = self._new_node(is_leaf=True)  # secondary continuation (hybrid genome)
+        donor_leaf = self._new_node(is_leaf=True)  # primary continuation (unchanged)
 
         all_genes = set(range(self.Ngene))
-        self.G.add_edge(primary,   hyb_leaf,   edge_type='tree', length=0.0, time_length=0.0, genes=primary_genes)
-        self.G.add_edge(secondary, donor_leaf, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
-        self.G.add_edge(secondary, primary, edge_type='reticulation', length=primary_inher * d12, time_length=0.0, genes=secondary_genes, inher_weight=secondary_inher)
-        self.G[parent_of_primary][primary]['inher_weight'] = primary_inher
+        self.G.add_edge(secondary, hyb_leaf,   edge_type='tree', length=0.0, time_length=0.0, genes=secondary_genes)
+        self.G.add_edge(primary,   donor_leaf, edge_type='tree', length=0.0, time_length=0.0, genes=all_genes)
+        self.G.add_edge(primary, secondary, edge_type='reticulation', length=secondary_inher * d12, time_length=0.0, genes=primary_genes, inher_weight=primary_inher)
+        self.G[parent_of_secondary][secondary]['inher_weight'] = secondary_inher
 
-        self.G.nodes[primary]['is_hyb_node'] = True
+        self.G.nodes[secondary]['is_hyb_node'] = True
         self.G.nodes[hyb_leaf]['is_hyb_leaf'] = True
         self.leaves.update({hyb_leaf, donor_leaf})
 
-        self._blend_distance(primary, secondary, hyb_leaf, primary_inher, secondary_inher)
-        self._rename_distance(secondary, donor_leaf)
-        self._drop_distance(primary)
+        self._blend_distance(secondary, primary, hyb_leaf, secondary_inher, primary_inher)
+        self._rename_distance(primary, donor_leaf)
+        self._drop_distance(secondary)
 
         if self.trait_model is not None:
             self.G.nodes[hyb_leaf]['trait'] = hyb_trait
-            self.G.nodes[donor_leaf]['trait'] = secondary_trait
+            self.G.nodes[donor_leaf]['trait'] = primary_trait
 
 
 # ── Gillespie loop ─────────────────────────────────────────────────────────────
@@ -357,12 +360,12 @@ class SimParams:
     stopping_num_leaves: Optional[int] = None  # simulation also stops once state.leaves reaches this count
 
 
-def _sim_one(state: SimState, params: SimParams) -> dict:
-    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict, distance_hybrid: dict}."""
+def _sim_one(state: SimState, params: SimParams, which_nodes: str = "no_hyb_nodes") -> dict:
+    """Run one BDH simulation from the given SimState; return {phy: PhyloNetwork | 0, distance: dict, distance_include_tips: dict, distance_include_tips_changes: dict, distance_only_tips: dict, filtered_G: nx.DiGraph, tree_only_G: nx.DiGraph}."""
     while True:
         n = len(state.leaves)
         if n == 0:
-            return {'phy': 0, 'distance': None, 'distance_hybrid': None}
+            return {'phy': 0, 'distance': None, 'distance_include_tips': None, 'distance_include_tips_changes': None, 'distance_only_tips': None, 'filtered_G': None, 'tree_only_G': None}
         if params.stopping_num_leaves is not None and n >= params.stopping_num_leaves:
             break
 
@@ -395,7 +398,7 @@ def _sim_one(state: SimState, params: SimParams) -> dict:
             _try_hybridization(state, sp1, params)
 
     _finalize_pendant_edges(state)
-    return _build_output(state)
+    return _build_output(state, which_nodes=which_nodes)
 
 
 def _sample_one(leaves: set[int]) -> int:
@@ -523,7 +526,7 @@ def _assign_labels(G: nx.DiGraph):
         G.nodes[n]['label'] = label
 
 
-def _build_output(state: SimState):
+def _build_output(state: SimState, which_nodes: str = "no_hyb_nodes"):
     _assign_labels(state.G)
 
     tip_states = None
@@ -540,14 +543,39 @@ def _build_output(state: SimState):
         tip_states=tip_states,
     )
 
-    tree_only = state.G.edge_subgraph(
-        [(u, v) for u, v, edge_type in state.G.edges(data='edge_type') if edge_type != 'reticulation']
+    filtered_G = phy.filter_nodes(which_nodes=which_nodes)
+    filtered_nodes = set(filtered_G.nodes())
+
+    tree_only = filtered_G.edge_subgraph(
+        [(u, v) for u, v, edge_type in filtered_G.edges(data='edge_type') if edge_type != 'reticulation']
     )
-    distance = dict(nx.all_pairs_dijkstra_path_length(tree_only.to_undirected(), weight='length'))
+    tree_only_undirected = tree_only.to_undirected()
+    distance = dict(nx.all_pairs_dijkstra_path_length(tree_only_undirected, weight='length'))
 
-    distance_hybrid = {i: dict(row) for i, row in distance.items()}
+    distance_include_tips = {i: dict(row) for i, row in distance.items()}
+    distance_include_tips_changes = {}
     for i, row in state.distance.items():
+        if i not in filtered_nodes:
+            continue
         for j, d in row.items():
-            distance_hybrid[i][j] = d
+            if j not in filtered_nodes:
+                continue
+            old = distance_include_tips[i].get(j)
+            if old:
+                distance_include_tips_changes[(i, j)] = {'old': old, 'new': d, 'ratio': (d - old) / old}
+            distance_include_tips[i][j] = d
 
-    return {'phy': phy, 'distance': distance, 'distance_hybrid': distance_hybrid}
+    distance_only_tips = {
+        i: {j: d for j, d in row.items() if j in filtered_nodes}
+        for i, row in state.distance.items() if i in filtered_nodes
+    }
+
+    return {
+        'phy': phy,
+        'distance': distance,
+        'distance_include_tips': distance_include_tips,
+        'distance_include_tips_changes': distance_include_tips_changes,
+        'distance_only_tips': distance_only_tips,
+        'filtered_G': filtered_G,
+        'tree_only_G': tree_only,
+    }

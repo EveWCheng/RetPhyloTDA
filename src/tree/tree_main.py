@@ -1,11 +1,18 @@
 import os
 import re
 import shutil
+import sys
 import numpy as np
+import networkx as nx
 from tqdm.std import TqdmDefaultWriteLock
 
 import cProfile, pstats
 from pstats import SortKey
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SHARED_DIR = os.path.join(HERE, os.pardir, "shared")
+if SHARED_DIR not in sys.path:
+    sys.path.insert(0, SHARED_DIR)
 
 TqdmDefaultWriteLock.mp_lock = None
 
@@ -13,10 +20,11 @@ from sim_bdh import SimState, SimParams, _sim_one, enumerate_gene_trees
 from export import export_csv, export_filtered
 from network_lab_tda.tree_edit.tree_addition import networkx_to_tree_json, merge_trees, visualize
 from find_cycles import CycleFinder
+from filter_cycle import FilterCycle
+from tree_filter_cycle import TreeFilterCycle
 from shared_node_utils import filter_shared_nodes_by_spread
 from polymorphic_edges import write_polymorphic_edges, write_reticulate_edges
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 TREE_GROUP_OUTPUTS_DIR = os.path.join(HERE, os.pardir, "outputs", "tree_group_outputs")
 TREE_GROUPS_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "tree_groups")
 MERGED_TREE_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "merged_tree")
@@ -107,13 +115,34 @@ def leaf_labels_by_number(filtered_G):
     return labels
 
 
+def build_dist_matrix(G, weight_attr, output_path, populated_header_fn="populated_headers.txt"):
+    # graphs whose edges lack the weight_attr (e.g. merged_G) fall back to weight 1
+    G_undirected = G.to_undirected() if G.is_directed() else G
+    dist_matrix = nx.floyd_warshall_numpy(G_undirected, weight=weight_attr)
+    index_to_name = {
+        i: attrs.get("label", node)
+        for i, (node, attrs) in enumerate(G_undirected.nodes(data=True))
+    }
+    # main_result_analysis.read_index_to_name() reads this back to name simplices
+    with open(os.path.join(output_path, populated_header_fn), "w") as f:
+        f.write("\n".join(str(v) for v in index_to_name.values()))
+    np.savetxt(os.path.join(output_path, "populated_distance_matrix.txt"), dist_matrix)
+    return G_undirected, dist_matrix, index_to_name
+
+
 def find_cycles_in_merged_tree(merged_G,enumerated_trees, filter_option, leaf_labels):
-    cf = CycleFinder(merged_G, threshold_mode=THRESHOLD_MODE, cycle_qualify_mode=CYCLE_QUALIFY_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, thresholds=THRESHOLDS, min_cycle_length=MIN_CYCLE_LENGTH, use_data_prep=False, vis=True, sharing_unit=SHARING_UNIT, delete_true_edges=DELETE_TRUE_EDGES, max_plot_cycles=MAX_PLOT_CYCLES)
+    output_path = os.path.join(TREE_GROUP_OUTPUTS_DIR, "proc_phylo_outputs")
+    os.makedirs(output_path, exist_ok=True)
+    G_undirected, dist_matrix, index_to_name = build_dist_matrix(merged_G, "length", output_path)
+    cf = CycleFinder(G_undirected, threshold_mode=THRESHOLD_MODE, output_dir=TREE_GROUP_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, thresholds=THRESHOLDS)
     cf.find_cycles()
+    fc = FilterCycle(cf, cycle_qualify_mode=CYCLE_QUALIFY_MODE, min_cycle_length=MIN_CYCLE_LENGTH, vis=True, max_plot_cycles=MAX_PLOT_CYCLES)
+    fc.visualize()
+    tfc = TreeFilterCycle(fc, sharing_unit=SHARING_UNIT, delete_true_edges=DELETE_TRUE_EDGES)
     if filter_option[0] == "nodes_only":
-        cf.print_most_shared_units()
+        tfc.print_most_shared_units()
     elif filter_option[0]== "tree_by_tree_deletion":
-        cf.tree_by_tree_delete(enumerated_trees,filter_option[1], leaf_labels)
+        tfc.tree_by_tree_delete(enumerated_trees,filter_option[1], leaf_labels)
     return cf.cycle_output_path
 
 
