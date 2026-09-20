@@ -11,6 +11,7 @@ wheels/
 
 # Outputs
 outputs/
+temp_latex/
 
 # Local libraries
 src/lib/
