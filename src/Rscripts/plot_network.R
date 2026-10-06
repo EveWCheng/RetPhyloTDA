@@ -6,24 +6,32 @@ library(yaml)
 # ── Config ────────────────────────────────────────────────────────────────────
 # First CLI arg is the path to a config yaml (input_dir / output_dir). Any
 # further args are sim indices to restrict the run to; if none are given,
-# every simN_nodes.csv/simN_edges.csv pair found in input_dir is plotted.
+# every sim with a simN_nodes.csv or simN_filtered_nodes.csv in input_dir is
+# plotted. Relative paths in the config are resolved against the config file's
+# own directory, so the script can be run from any working directory.
 # Usage: Rscript plot_network.R <config.yaml> [sim_indices...]
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1) {
   stop("Usage: Rscript plot_network.R <config.yaml> [sim_indices...]")
 }
-config   <- yaml::read_yaml(args[1])
-IN_DIR   <- config$input_dir
-PLOT_DIR <- config$output_dir
+config     <- yaml::read_yaml(args[1])
+CONFIG_DIR <- dirname(normalizePath(args[1], mustWork = TRUE))
+resolve_path <- function(p) {
+  if (grepl("^(/|~)", p)) path.expand(p) else file.path(CONFIG_DIR, p)
+}
+IN_DIR   <- normalizePath(resolve_path(config$input_dir), mustWork = TRUE)
+PLOT_DIR <- resolve_path(config$output_dir)
 if (!dir.exists(PLOT_DIR)) dir.create(PLOT_DIR, recursive = TRUE)
+PLOT_DIR <- normalizePath(PLOT_DIR)
 
 sim_args <- args[-1]
 if (length(sim_args) > 0) {
   sim_indices <- as.integer(sim_args)
 } else {
-  node_files  <- list.files(IN_DIR, pattern = "^sim[0-9]+_nodes\\.csv$")
-  sim_indices <- sort(as.integer(gsub("sim([0-9]+)_nodes\\.csv", "\\1", node_files)))
+  # sim_main.py only exports the filtered CSVs; tree_main.py exports both.
+  node_files  <- list.files(IN_DIR, pattern = "^sim[0-9]+_(filtered_)?nodes\\.csv$")
+  sim_indices <- sort(unique(as.integer(gsub("^sim([0-9]+)_.*$", "\\1", node_files))))
 }
 
 # ── Build an ape/evonet phylo object from one sim's nodes/edges CSVs ──────────
@@ -116,6 +124,8 @@ plot_sim <- function(sim_index, kind = "") {
 
 for (sim_index in sim_indices) {
   for (kind in c("", "filtered_")) {
+    # Not every pipeline exports both kinds, so skip silently when absent
+    if (!file.exists(file.path(IN_DIR, paste0("sim", sim_index, "_", kind, "nodes.csv")))) next
     result <- tryCatch({
       plot_sim(sim_index, kind)
       TRUE

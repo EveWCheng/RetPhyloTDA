@@ -17,7 +17,7 @@ if SHARED_DIR not in sys.path:
 TqdmDefaultWriteLock.mp_lock = None
 
 from sim_bdh import SimState, SimParams, _sim_one, enumerate_gene_trees
-from export import export_csv, export_filtered
+from export import export_csv
 from network_lab_tda.tree_edit.tree_addition import networkx_to_tree_json, merge_trees, visualize
 from find_cycles import CycleFinder
 from filter_cycle import FilterCycle
@@ -25,7 +25,7 @@ from tree_filter_cycle import TreeFilterCycle
 from shared_node_utils import filter_shared_nodes_by_spread
 from polymorphic_edges import write_polymorphic_edges, write_reticulate_edges
 
-TREE_GROUP_OUTPUTS_DIR = os.path.join(HERE, os.pardir, "outputs", "tree_group_outputs")
+TREE_GROUP_OUTPUTS_DIR = os.path.join(HERE, os.pardir, os.pardir, "outputs", "tree_group_outputs")
 TREE_GROUPS_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "tree_groups")
 MERGED_TREE_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "merged_tree")
 PHYLO_CSV_DIR = os.path.join(TREE_GROUP_OUTPUTS_DIR, "phylo_csv")
@@ -158,9 +158,9 @@ def main(seed=43, which_nodes: str = "no_hyb_nodes"):
         if os.path.exists(TREE_GROUP_OUTPUTS_DIR):
             shutil.rmtree(TREE_GROUP_OUTPUTS_DIR)
         os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
-        export_csv(phy, PHYLO_CSV_DIR, prefix="sim0_")
+        export_csv(phy.G, PHYLO_CSV_DIR, prefix="sim0_")
         filtered_G = phy.filter_nodes(which_nodes=which_nodes)
-        export_filtered(filtered_G, PHYLO_CSV_DIR, prefix="sim0_")
+        export_csv(filtered_G, PHYLO_CSV_DIR, prefix="sim0_filtered_", by_label=True)
         leaf_labels = leaf_labels_by_number(filtered_G)
         merged_G,enumerated_trees  = process_gene_trees(phy, which_nodes=which_nodes)
         print("the gene trees have been merged")

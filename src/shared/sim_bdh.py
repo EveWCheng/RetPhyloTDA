@@ -579,3 +579,39 @@ def _build_output(state: SimState, which_nodes: str = "no_hyb_nodes"):
         'filtered_G': filtered_G,
         'tree_only_G': tree_only,
     }
+
+
+def add_midpoint_hybrids(distance_include_tips: dict, distance_include_tips_changes: dict, label_of: dict, top_percent: float, w: float = 0.5):
+    """Add a hybrid point E between each of the top_percent% tip pairs ranked by 'ratio' (most shortened
+    first; ties, including the ~1e-16 noise on unchanged pairs, go to the longest tree path 'old').
+
+    Returns (dressed copy of distance_include_tips, [(name, tip_a, tip_b), ...]); the inputs are not modified.
+    d(E, k) = (1-w)*d(A, k) + w*d(B, k) for every node k, tips and internal; between two added
+    points the same averaging is applied to both, so the result does not depend on insertion order.
+    E is keyed by its name, f"{label_of[A]}_{label_of[B]}".
+    """
+    pairs = {}
+    for (i, j), change in distance_include_tips_changes.items():
+        pairs.setdefault(frozenset((i, j)), ((i, j), (round(change['ratio'], 9), -change['old'])))
+    ranked = sorted(pairs.values(), key=lambda p: p[1])
+    n_selected = max(1, int(np.ceil(len(ranked) * top_percent / 100))) if ranked else 0
+    selected = [pair for pair, _ in ranked[:n_selected]]
+
+    dressed = {i: dict(row) for i, row in distance_include_tips.items()}
+    weights = {}   # name -> {parent tip: weight}
+    for a, b in selected:
+        name = f"{label_of[a]}_{label_of[b]}"
+        weights[name] = {a: 1 - w, b: w}
+        dressed[name] = {k: (1 - w) * distance_include_tips[a][k] + w * distance_include_tips[b][k] for k in distance_include_tips}
+        dressed[name][name] = 0.0
+        for k, d in list(dressed[name].items()):
+            if k in distance_include_tips:
+                dressed[k][name] = d
+
+    for e1, e2 in itertools.combinations(weights, 2):
+        d = sum(w1 * w2 * distance_include_tips[p1][p2] for p1, w1 in weights[e1].items() for p2, w2 in weights[e2].items())
+        dressed[e1][e2] = d
+        dressed[e2][e1] = d
+
+    added = [(name, a, b) for name, (a, b) in zip(weights, selected)]
+    return dressed, added

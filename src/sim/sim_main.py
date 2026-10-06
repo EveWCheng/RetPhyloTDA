@@ -18,8 +18,8 @@ if SHARED_DIR not in sys.path:
 # leaving it unset causes a "leakedsemaphore" warning from multiprocessing.resource_tracker at interpreter shutdown.
 TqdmDefaultWriteLock.mp_lock = None
 
-from sim_bdh import SimState, SimParams, _sim_one
-from export import export_filtered
+from sim_bdh import SimState, SimParams, _sim_one, add_midpoint_hybrids
+from export import export_csv
 from find_cycles import CycleFinder
 from filter_cycle import FilterCycle
 
@@ -63,8 +63,8 @@ def should_populate_fxn(u, v, attrs):
     return attrs.get("edge_type") != "reticulation"
 
 
-def _dist_matrix_from_dict(tree_only_G_undirected, distance):
-    node_to_index = {node: idx for idx, node in enumerate(tree_only_G_undirected.nodes())}
+def _dist_matrix_from_dict(nodes, distance):
+    node_to_index = {node: idx for idx, node in enumerate(nodes)}
     n = len(node_to_index)
     dist_matrix = np.zeros((n, n))
     for u, row in distance.items():
@@ -84,8 +84,22 @@ def write_distance_include_tips_changes(filtered_G, distance_include_tips_change
         json.dump(by_label, f, indent=2)
 
 
-def build_dist_matrix(G, distance_include_tips, distance_only_tips, use_data_prep, weight_attr, output_path, populated_header_fn="populated_headers.txt", should_populate_fxn=None):
-    if use_data_prep:
+def build_dist_matrix(G, distance_include_tips, distance_only_tips, use_data_prep, weight_attr, output_path, populated_header_fn="populated_headers.txt", should_populate_fxn=None, distance_include_tips_changes=None, midpoint_top_percent=None):
+    if midpoint_top_percent is not None:
+        # midpoint hybrids replace data prep: dress the dict first, then the added points take the rows after G's nodes
+        label_of = dict(G.nodes(data="label"))
+        dressed, added = add_midpoint_hybrids(distance_include_tips, distance_include_tips_changes, label_of, midpoint_top_percent)
+        names = [name for name, _, _ in added]
+        dist_matrix = _dist_matrix_from_dict(list(G.nodes()) + names, dressed)
+        index_to_name = {
+            i: attrs.get("label", node)
+            for i, (node, attrs) in enumerate(G.nodes(data=True))
+        }
+        index_to_name.update({len(index_to_name) + i: name for i, name in enumerate(names)})
+        # main_result_analysis reads this back to count the added points as tips ("mid-tip")
+        with open(os.path.join(output_path, "midpoints.json"), "w") as f:
+            json.dump([{"name": name, "type": "mid-tip", "parents": [label_of[a], label_of[b]]} for name, a, b in added], f, indent=2)
+    elif use_data_prep:
         dp = Data_Prep(G=G, log_path=output_path, headers=False, weight_attr=weight_attr)
         pe = Populate_Edge(G=dp.G, log_path=output_path, headers=False, populated_header_fn=populated_header_fn, max_node_per_edge=0, weight_attr=weight_attr, should_populate_fxn=should_populate_fxn)
         dist_matrix = pe.populate_edges()
@@ -114,6 +128,7 @@ def main(config_path=CONFIG_PATH, gene_index: Optional[int] = None):
     which_nodes = config["which_nodes"]
     weight_attr = config["weight_attr"]
     min_cycle_length = config["min_cycle_length"]
+    midpoint_top_percent = config["midpoint_top_percent"] if config["add_midpoints"] else None
 
     if seed is not None:
         np.random.seed(seed)
@@ -144,10 +159,9 @@ def main(config_path=CONFIG_PATH, gene_index: Optional[int] = None):
 
         filtered_G = r['filtered_G']
 
-        export_filtered(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_")
+        export_csv(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_filtered_", by_label=True)
         max_edge_length = max(d for _, _, d in filtered_G.edges(data=weight_attr))
-        # snapshot the network at each reticulation edge's own length, in addition to cycle-birth
-        # thresholds (CycleFinder appends those automatically since "fixed" isn't in threshold_mode)
+        # snapshot the network at each reticulation edge's own length, in addition to cycle-birth thresholds (CycleFinder appends those automatically since "fixed" isn't in threshold_mode)
         retic_edge_lengths = [
             attrs[weight_attr]+1e-2 for _, _, attrs in filtered_G.edges(data=True) if attrs.get("edge_type") == "reticulation"
         ]
@@ -167,8 +181,10 @@ def main(config_path=CONFIG_PATH, gene_index: Optional[int] = None):
             weight_attr=weight_attr,
             output_path=output_path,
             should_populate_fxn=should_populate_fxn,
+            distance_include_tips_changes=r['distance_include_tips_changes'],
+            midpoint_top_percent=midpoint_top_percent,
         )
-        cf = CycleFinder(undirected_filtered_G_tree, threshold_mode=["cyclelength", "marker"], output_dir=SIM_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, sim_label=f"sim{i}", rips_threshold=float('inf'), thresholds=retic_edge_lengths)
+        cf = CycleFinder(undirected_filtered_G_tree, threshold_mode=[], output_dir=SIM_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, sim_label=f"sim{i}", rips_threshold=float('inf'), thresholds=retic_edge_lengths)
         cf.find_cycles()
         FilterCycle(cf, cycle_qualify_mode=[], which_nodes=which_nodes, min_cycle_length=min_cycle_length).visualize()
 

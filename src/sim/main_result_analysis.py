@@ -82,22 +82,6 @@ def read_cycles_by_name(sim_id):
     return result
 
 
-def minimal_cycles_by_name(sim_id):
-    cycles = read_cycles_by_name(sim_id)
-    if cycles is None:
-        return None
-    result = []
-    for cycle in cycles:
-        graph = nx.Graph()
-        for edge in cycle["edges"]:
-            u, v = edge["nodes"]
-            graph.add_edge(u, v)
-        basis = nx.minimum_cycle_basis(graph)
-        minimal_cycle = min(basis, key=len) if basis else None
-        result.append(minimal_cycle)
-    return result
-
-
 def read_reticulate_edges_by_name(sim_id):
     path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_filtered_edges.csv")
     if not os.path.exists(path):
@@ -144,23 +128,28 @@ def shortest_path_edges(net, u, v):
 
 
 def top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only):
-    """Per cycle, dicts {edge, weight, path} for top-ranked cycle edges. Ranks by |weight|, keeps top_k plus ties. Only leaf-to-leaf edges when tip_to_tip_only. path lists edges on any shortest network route. path is None if an endpoint is off-graph."""
+    """Per cycle, dicts {edge, weight, path, traced} for top-ranked cycle edges. Ranks by |weight|, keeps top_k plus ties. Only leaf-to-leaf edges (mid-tips count) when tip_to_tip_only. path lists edges on any shortest network route. For an edge touching a mid-tip, the other endpoint is ignored and path is its two parents' path instead (the union of both when both ends are mid-tips); traced names the endpoints actually traced. path is None if an endpoint is off-graph."""
     net = read_network_graph(sim_id)
+    mid_tips = read_midpoints(sim_id)
     result = []
     for cycle in cycles:
         edges = cycle["edges"]
         if tip_to_tip_only and net is not None:
-            edges = [e for e in edges if all(n in net and net.nodes[n]["is_leaf"] for n in e["nodes"])]
+            edges = [e for e in edges if all(n in mid_tips or (n in net and net.nodes[n]["is_leaf"]) for n in e["nodes"])]
         ranked = sorted(edges, key=lambda e: abs(e["weight"]), reverse=True)
         cutoff = abs(ranked[top_k - 1]["weight"]) if len(ranked) >= top_k else 0.0
         entries = []
         for edge in [e for e in ranked if abs(e["weight"]) >= cutoff]:
             u, v = edge["nodes"]
-            if net is None or u not in net or v not in net:
+            traced = [mid_tips[n] for n in (u, v) if n in mid_tips] or [(u, v)]
+            parts = None if net is None or any(n not in net for pair in traced for n in pair) else [shortest_path_edges(net, a, b) for a, b in traced]
+            if parts is None or None in parts:
                 path = None
             else:
-                path = shortest_path_edges(net, u, v)
-            entries.append({"edge": (u, v), "weight": edge["weight"], "path": path})
+                path = []
+                for part in parts:
+                    path += [p for p in part if p not in path]
+            entries.append({"edge": (u, v), "weight": edge["weight"], "path": path, "traced": traced})
         result.append(entries)
     return result
 
@@ -197,13 +186,22 @@ def reticulate_edges_per_cycle(cycles, retic_edges):
     return result
 
 
+def read_midpoints(sim_id):
+    """Names of the added midpoint hybrids ("mid-tip") from midpoints.json, mapped to their two parent tip labels. Empty if the run added none."""
+    path = os.path.join(PROC_OUTPUTS_DIR, f"sim{sim_id}", "midpoints.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return {m["name"]: tuple(m["parents"]) for m in json.load(f) if m["type"] == "mid-tip"}
+
+
 def read_leaf_labels(sim_id):
-    """Labels of current tips from simN_filtered_nodes.csv. Uses live is_leaf, not the sticky 'type' category."""
+    """Labels of current tips from simN_filtered_nodes.csv, plus mid-tips. Uses live is_leaf, not the sticky 'type' category."""
     path = os.path.join(PHYLO_CSV_DIR, f"sim{sim_id}_filtered_nodes.csv")
     if not os.path.exists(path):
         return None
     with open(path, newline="") as f:
-        return {row["label"] for row in csv.DictReader(f) if row["is_leaf"] == "True"}
+        return {row["label"] for row in csv.DictReader(f) if row["is_leaf"] == "True"} | set(read_midpoints(sim_id))
 
 
 def tip_edges_per_cycle(cycles, leaf_labels):
@@ -238,6 +236,7 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only):
     tip_edges_per_cycle_result = tip_edges_per_cycle(cycles, leaf_labels)
     if retic_edges is None or cycles is None or found_per_cycle is None or tip_edges_per_cycle_result is None:
         return None
+    mid_tips = read_midpoints(sim_id)
 
     lines = []
     lines.append(f"sim{sim_id} analysis")
@@ -261,9 +260,10 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only):
         lines.append(f"    tip-to-tip edges ({len(tip_edges)}):")
         for edge in tip_edges:
             closing_flag = "  CLOSING EDGE" if edge["is_closing"] else ""
+            mid_flag = "  (mid-tip)" if any(n in mid_tips for n in edge["edge"]) else ""
             lines.append(
                 f"      {edge['edge']}  weight={edge['weight']}  "
-                f"rank={edge['rank']}/{edge['num_distinct_appears_at']}{closing_flag}"
+                f"rank={edge['rank']}/{edge['num_distinct_appears_at']}{closing_flag}{mid_flag}"
             )
 
     top_paths = top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only)
@@ -277,6 +277,8 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only):
         for entry in entries:
             u, v = entry["edge"]
             lines.append(f"    {u} -- {v}  weight={entry['weight']}")
+            if entry["traced"] != [(u, v)]:
+                lines.append("      (mid-tip: traced parent path " + ", ".join(f"{a} -- {b}" for a, b in entry["traced"]) + ")")
             if entry["path"] is None:
                 lines.append("      no path (endpoint missing from network graph)")
                 continue
