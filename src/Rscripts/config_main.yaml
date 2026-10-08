@@ -1,2 +1,3 @@
 input_dir: "../../outputs/sim_phylo_outputs/phylo_csv"
 output_dir: "../../outputs/sim_phylo_outputs/phylo_plots"
+report_dir: "../../outputs/sim_phylo_outputs/analysis_reports"

@@ -444,4 +444,57 @@ components, complementary-pair filtering) — nothing discriminated real signal 
 noise further. Likely needs branch lengths (unused `length` attrs), not more topology
 heuristics.
 
+***DATE 2026-10-06 — Midpoint hybrids ("mid-tips") between shrunk tip pairs
+
+## Background checks
+
+- Sim tip distances are **blended**, not shortest paths: hybrid H of parents P (major,
+  1−w) and S (minor, w) gets `d(H,k) = (1−w)·d(P,k) + w·d(S,k)`. Always ≤ the network
+  shortest path (774/1002 shrunk pairs strictly below). Only tip–tip cells are dressed;
+  tip–internal cells stay tree distances.
+- Only the minor parent edge is `edge_type="reticulation"` (inher_w < 0.5); the major one
+  is `tree`. So reports never show retic edges with inher_w > 0.5.
+- Shrink grows with inher_w (Spearman −0.58, plateaus ~0.3–0.5); built into the blend.
+
+## Feature
+
+- `sim_bdh.add_midpoint_hybrids`: top `midpoint_top_percent`% tip pairs by `ratio`
+  (most shrunk first, ties → longest `old`), adds E = `"{A}_{B}"` with
+  `d(E,k) = 0.5·d(A,k) + 0.5·d(B,k)` to every node (so `d(A,B)/2` from the whole A–B path).
+- `sim_config.toml`: `add_midpoints`, `midpoint_top_percent`; when on, `build_dist_matrix`
+  skips data prep and writes `midpoints.json`.
+- `main_result_analysis`: mid-tips count as tips, marked `(mid-tip)`; a mid-tip edge traces
+  its parents' A–B path (other endpoint ignored).
+- Baseline (no midpoints) cached in `outputs/sim_phylo_outputs_baseline_no_midpoints/`.
+  Seed 42 → identical networks in both runs.
+
+## Results (41 sims, 111 retic edges)
+
+| | baseline | 5% | 20% | 100% |
+|---|--:|--:|--:|--:|
+| cycles | 24 | 55 | 138 | 491 |
+| retic on top-3 path | 25 (23%) | 41 (37%) | 64 (58%) | 101 (91%) |
+| … via ordinary tip–tip edges | 25 | 8 | 6 | 5 |
+| retic on selected A–B paths, **no TDA** | – | 34 | 61 | 102 |
+
+**Takeaway:** the gain is mostly circular — mid-tip pairs are picked for shrinking, and a
+shrunk pair's shortest path usually (69%, not always) crosses a reticulation; TDA adds ≤ 7
+over just listing those paths (none at 100%). Mid-tip edges crowd ordinary edges out of the
+top 3 and create their own cycles. 100% runs (~1 min vs 3 s) but midpoints scale as n²;
+will blow up with more tips.
+
+## Top-1 edge only, and path precision
+
+Shortest paths with no reticulation edge (baseline): 49% of all tip pairs, 31% of shrunk
+pairs (blending shrinks pairs routed via the major parent's `tree` edge), 99% of unshrunk.
+
+| midpoints | retic found (top-1 / top-3) | traced paths containing a retic |
+|---|--:|--:|
+| 0% | 24 / 25 | 100% (24/24) |
+| 20% | 64 / 64 | 98% |
+| 100% | 101 / 101 | 65% (≈ random pair) |
+
+Top-1 ≈ top-3: the strongest cycle edge carries the signal. Midpoints trade precision for
+coverage; 20% keeps precision, 100% is near noise.
+
 

@@ -24,6 +24,8 @@ IN_DIR   <- normalizePath(resolve_path(config$input_dir), mustWork = TRUE)
 PLOT_DIR <- resolve_path(config$output_dir)
 if (!dir.exists(PLOT_DIR)) dir.create(PLOT_DIR, recursive = TRUE)
 PLOT_DIR <- normalizePath(PLOT_DIR)
+# Optional: main_result_analysis.py's simN_analysis.txt reports, used to colour detected reticulations
+REPORT_DIR <- if (!is.null(config$report_dir)) resolve_path(config$report_dir) else NULL
 
 sim_args <- args[-1]
 if (length(sim_args) > 0) {
@@ -83,6 +85,28 @@ build_phy <- function(nodes, edges) {
   phy
 }
 
+# ── Reticulations detected per main_result_analysis.py's report ──────────────
+
+# Returns "from--to" keys of reticulations listed as on / not on a cycle-edge path, or NULL
+# when there is no report. Reads whatever top-k the report was written with.
+read_detection <- function(sim_index) {
+  if (is.null(REPORT_DIR)) return(NULL)
+  report_file <- file.path(REPORT_DIR, paste0("sim", sim_index, "_analysis.txt"))
+  if (!file.exists(report_file)) return(NULL)
+  lines <- readLines(report_file)
+  on_start  <- grep("^reticulate edges on at least one top-[0-9]+ cycle-edge path", lines)
+  off_start <- grep("^reticulate edges on no top-[0-9]+ cycle-edge path", lines)
+  if (length(on_start) != 1 || length(off_start) != 1) return(NULL)
+  edge_keys <- function(block) {
+    hits <- regmatches(block, regexec("^  (\\S+) -- (\\S+)  inher_weight=", block))
+    unlist(lapply(hits, function(m) if (length(m) == 3) paste(m[2], m[3], sep = "--")))
+  }
+  off_end <- off_start + which(!grepl("^  ", lines[-seq_len(off_start)]))[1] - 1
+  if (is.na(off_end)) off_end <- length(lines)
+  list(detected = edge_keys(lines[(on_start + 1):(off_start - 1)]),
+       missed   = edge_keys(lines[seq(off_start + 1, length.out = off_end - off_start)]))
+}
+
 # ── Read one sim's CSVs, plot it, and write the PDF ───────────────────────────
 
 # kind = "" plots simN_nodes.csv/simN_edges.csv (raw phy.G, export_csv);
@@ -112,9 +136,40 @@ plot_sim <- function(sim_index, kind = "") {
     title(main = title_label)
     text(0.5, 0.5, paste("Only", length(phy$tip.label), "tip - nothing to plot"))
   } else {
-    plot(phy, main = title_label)
+    # reticulations: red = on a cycle-edge path in the analysis report, grey dashed = missed,
+    # blue = no report (same order as build_phy's phy$reticulation rows)
+    ret_edges <- edges[edges$edge_type == "reticulation", ]
+    detection <- if (kind == "filtered_") read_detection(sim_index) else NULL
+    ret_col <- "blue"; ret_lty <- 1; ret_lwd <- 1
+    if (!is.null(detection) && nrow(ret_edges) > 0) {
+      fwd <- paste(ret_edges$from, ret_edges$to, sep = "--")
+      rev <- paste(ret_edges$to, ret_edges$from, sep = "--")
+      hit  <- fwd %in% detection$detected | rev %in% detection$detected
+      miss <- fwd %in% detection$missed   | rev %in% detection$missed
+      ret_col <- ifelse(hit, "red", ifelse(miss, "grey50", "blue"))
+      ret_lty <- ifelse(hit, 1, 2)
+      ret_lwd <- 1
+      title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected")
+    }
+    plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9)
     internal_labels <- nodes$label[match(internal_ids, nodes$id)]
     ape::nodelabels(text = internal_labels, cex = 0.6, frame = "none", col = "blue")
+    # edge lengths (2 dp); zero-length edges are left unlabelled to keep the plot readable
+    tree_len <- phy$edge.length
+    ape::edgelabels(text = ifelse(tree_len > 0, formatC(tree_len, format = "f", digits = 2), ""),
+                    cex = 0.5, frame = "none", adj = c(0.5, -0.4), col = "darkgreen")
+    if (!is.null(phy$reticulation)) {
+      # ape has no labeller for reticulation lines, so place each length at its line's midpoint
+      lp <- get("last_plot.phylo", envir = ape::.PlotPhyloEnv)
+      mid_x <- (lp$xx[phy$reticulation[, 1]] + lp$xx[phy$reticulation[, 2]]) / 2
+      mid_y <- (lp$yy[phy$reticulation[, 1]] + lp$yy[phy$reticulation[, 2]]) / 2
+      text(mid_x, mid_y, formatC(phy$reticulation.length, format = "f", digits = 2),
+           cex = 0.5, col = ifelse(is.character(ret_col) & ret_col == "red", "red", "grey30"))
+    }
+    if (!is.null(detection) && nrow(ret_edges) > 0) {
+      legend("topleft", legend = c("retic detected", "retic missed"), col = c("red", "grey50"),
+             lty = c(1, 2), lwd = c(1, 1), bty = "n", cex = 0.7)
+    }
   }
 
   cat("Plot written to", out_file, "\n")
