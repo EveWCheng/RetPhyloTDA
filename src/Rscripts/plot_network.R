@@ -112,7 +112,47 @@ read_detection <- function(sim_index) {
   missed   <- section_keys("^reticulate edges on no top-[0-9]+ cycle-edge path")
   if (is.null(detected) || is.null(missed)) return(NULL)
   off_tip <- section_keys("^reticulate edges on no tip-to-tip shortest path")
-  list(detected = detected, missed = missed, off_tip = if (is.null(off_tip)) character(0) else off_tip)
+  list(detected = detected, missed = missed, off_tip = if (is.null(off_tip)) character(0) else off_tip,
+       traced = traced_pairs(lines))
+}
+
+# tip pairs whose shortest paths were traced: each top cycle edge, or its mid-tip parent pair(s)
+traced_pairs <- function(lines) {
+  start <- grep("^top-[0-9]+ cycle-edge shortest paths", lines)
+  if (length(start) != 1) return(list())
+  pairs <- list()
+  rest <- lines[-seq_len(start)]
+  for (i in seq_along(rest)) {
+    if (!grepl("^  ", rest[i])) break
+    m <- regmatches(rest[i], regexec("^    (\\S+) -- (\\S+)  weight=", rest[i]))[[1]]
+    if (length(m) != 3) next
+    nxt <- if (i < length(rest)) rest[i + 1] else ""
+    if (grepl("^      \\(mid-tip: traced parent path ", nxt)) {
+      path_text <- sub("^.*traced parent path ", "", nxt)
+      parents <- regmatches(path_text, gregexpr("\\S+ -- \\S+", path_text))[[1]]
+      for (p in parents) pairs[[length(pairs) + 1]] <- strsplit(sub("[,)]$", "", p), " -- ")[[1]]
+    } else {
+      pairs[[length(pairs) + 1]] <- m[2:3]
+    }
+  }
+  keys <- vapply(pairs, function(p) paste(sort(p), collapse = "--"), "")
+  pairs[!duplicated(keys)]
+}
+
+# purple bracket right of the tip labels joining each traced tip pair, one column per pair
+draw_traced_pairs <- function(traced, tip_names, shown_labels) {
+  lp    <- get("last_plot.phylo", envir = ape::.PlotPhyloEnv)
+  ntip  <- length(tip_names)
+  x_end <- max(lp$xx[seq_len(ntip)]) + max(strwidth(shown_labels)) * 1.1
+  step  <- diff(par("usr")[1:2]) * 0.03
+  for (k in seq_along(traced)) {
+    y  <- lp$yy[match(traced[[k]], tip_names)]
+    x0 <- x_end + k * step
+    segments(x_end, y, x0, y, col = "purple", lwd = 1.5)
+    segments(x0, y[1], x0, y[2], col = "purple", lwd = 1.5)
+  }
+  legend("bottomright", legend = paste0("traced tip pair (", length(traced), ")"), col = "purple",
+         lwd = 1.5, bty = "n", cex = 0.7)
 }
 
 # ── Read one sim's CSVs, plot it, and write the PDF ───────────────────────────
@@ -136,6 +176,7 @@ plot_sim <- function(sim_index, kind = "") {
   # kept as a reticulation source (e.g. a donor whose continuation died). Mark those apart from living tips.
   tip_is_live <- as.character(nodes$is_leaf[match(phy$tip.label, nodes$label)]) %in% c("True", "TRUE", "true")
   tip_color   <- ifelse(tip_is_live, "black", "grey50")
+  tip_names   <- phy$tip.label
   phy$tip.label <- ifelse(tip_is_live, phy$tip.label, paste(phy$tip.label, "†"))
 
   out_file <- file.path(PLOT_DIR, paste0("sim", sim_index, "_", kind, "network.pdf"))
@@ -168,7 +209,12 @@ plot_sim <- function(sim_index, kind = "") {
       title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected, ",
                             sum(off), " on no tip path\n(", REPORT_WEIGHT_FIELD, ")")
     }
-    plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9, tip.color = tip_color)
+    traced <- if (!is.null(detection)) Filter(function(p) all(p %in% tip_names), detection$traced) else list()
+    depth  <- max(ape::node.depth.edgelength(phy))
+    x_lim  <- if (length(traced) > 0) c(0, depth * (1.5 + 0.06 * length(traced))) else NULL
+    plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9, tip.color = tip_color,
+         x.lim = x_lim)
+    if (length(traced) > 0) draw_traced_pairs(traced, tip_names, phy$tip.label)
     if (!all(tip_is_live)) {
       legend("bottomleft", legend = "† not a living tip (extinct lineage)", text.col = "grey50", bty = "n", cex = 0.7)
     }
