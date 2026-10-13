@@ -24,8 +24,10 @@ IN_DIR   <- normalizePath(resolve_path(config$input_dir), mustWork = TRUE)
 PLOT_DIR <- resolve_path(config$output_dir)
 if (!dir.exists(PLOT_DIR)) dir.create(PLOT_DIR, recursive = TRUE)
 PLOT_DIR <- normalizePath(PLOT_DIR)
-# Optional: main_result_analysis.py's simN_analysis.txt reports, used to colour detected reticulations
+# Optional: main_result_analysis.py's simN_analysis_<weight_field>.txt reports, used to colour detected reticulations
 REPORT_DIR <- if (!is.null(config$report_dir)) resolve_path(config$report_dir) else NULL
+# which report to read: "weight" or "weight_before_projection" (main_result_analysis.py writes one per field)
+REPORT_WEIGHT_FIELD <- if (!is.null(config$report_weight_field)) config$report_weight_field else "weight"
 
 sim_args <- args[-1]
 if (length(sim_args) > 0) {
@@ -87,24 +89,30 @@ build_phy <- function(nodes, edges) {
 
 # ── Reticulations detected per main_result_analysis.py's report ──────────────
 
-# Returns "from--to" keys of reticulations listed as on / not on a cycle-edge path, or NULL
+# Returns "from--to" keys of reticulations listed as on / not on a cycle-edge path, and those on no
+# tip-to-tip shortest path at all (off_tip, empty for older reports without that section), or NULL
 # when there is no report. Reads whatever top-k the report was written with.
 read_detection <- function(sim_index) {
   if (is.null(REPORT_DIR)) return(NULL)
-  report_file <- file.path(REPORT_DIR, paste0("sim", sim_index, "_analysis.txt"))
+  report_file <- file.path(REPORT_DIR, paste0("sim", sim_index, "_analysis_", REPORT_WEIGHT_FIELD, ".txt"))
   if (!file.exists(report_file)) return(NULL)
   lines <- readLines(report_file)
-  on_start  <- grep("^reticulate edges on at least one top-[0-9]+ cycle-edge path", lines)
-  off_start <- grep("^reticulate edges on no top-[0-9]+ cycle-edge path", lines)
-  if (length(on_start) != 1 || length(off_start) != 1) return(NULL)
-  edge_keys <- function(block) {
-    hits <- regmatches(block, regexec("^  (\\S+) -- (\\S+)  inher_weight=", block))
-    unlist(lapply(hits, function(m) if (length(m) == 3) paste(m[2], m[3], sep = "--")))
+  # edge keys listed under the header matching `pattern`: the indented lines up to the next unindented one.
+  # NULL if the header is absent
+  section_keys <- function(pattern) {
+    start <- grep(pattern, lines)
+    if (length(start) != 1) return(NULL)
+    rest <- lines[-seq_len(start)]
+    n <- which(!grepl("^  ", rest))[1] - 1
+    if (is.na(n)) n <- length(rest)
+    hits <- regmatches(rest[seq_len(n)], regexec("^  (\\S+) -- (\\S+)  inher_weight=", rest[seq_len(n)]))
+    c(character(0), unlist(lapply(hits, function(m) if (length(m) == 3) paste(m[2], m[3], sep = "--"))))
   }
-  off_end <- off_start + which(!grepl("^  ", lines[-seq_len(off_start)]))[1] - 1
-  if (is.na(off_end)) off_end <- length(lines)
-  list(detected = edge_keys(lines[(on_start + 1):(off_start - 1)]),
-       missed   = edge_keys(lines[seq(off_start + 1, length.out = off_end - off_start)]))
+  detected <- section_keys("^reticulate edges on at least one top-[0-9]+ cycle-edge path")
+  missed   <- section_keys("^reticulate edges on no top-[0-9]+ cycle-edge path")
+  if (is.null(detected) || is.null(missed)) return(NULL)
+  off_tip <- section_keys("^reticulate edges on no tip-to-tip shortest path")
+  list(detected = detected, missed = missed, off_tip = if (is.null(off_tip)) character(0) else off_tip)
 }
 
 # ── Read one sim's CSVs, plot it, and write the PDF ───────────────────────────
@@ -124,8 +132,14 @@ plot_sim <- function(sim_index, kind = "") {
   phy <- build_phy(nodes, edges)
   internal_ids <- attr(phy, "internal_ids")
 
+  # build_phy makes every node without tree children a tip, including lineages that went extinct but are
+  # kept as a reticulation source (e.g. a donor whose continuation died). Mark those apart from living tips.
+  tip_is_live <- as.character(nodes$is_leaf[match(phy$tip.label, nodes$label)]) %in% c("True", "TRUE", "true")
+  tip_color   <- ifelse(tip_is_live, "black", "grey50")
+  phy$tip.label <- ifelse(tip_is_live, phy$tip.label, paste(phy$tip.label, "†"))
+
   out_file <- file.path(PLOT_DIR, paste0("sim", sim_index, "_", kind, "network.pdf"))
-  pdf(out_file)
+  pdf(out_file, encoding = "WinAnsi")  # WinAnsi has the dagger used to mark extinct lineages; the default doesn't
   on.exit(dev.off(), add = TRUE)
 
   title_label <- paste0("BDH Network - ", if (kind == "") "raw" else "filtered", " - sim", sim_index)
@@ -137,6 +151,7 @@ plot_sim <- function(sim_index, kind = "") {
     text(0.5, 0.5, paste("Only", length(phy$tip.label), "tip - nothing to plot"))
   } else {
     # reticulations: red = on a cycle-edge path in the analysis report, grey dashed = missed,
+    # thick orange dashed = missed and on no tip-to-tip shortest path at all (so undetectable),
     # blue = no report (same order as build_phy's phy$reticulation rows)
     ret_edges <- edges[edges$edge_type == "reticulation", ]
     detection <- if (kind == "filtered_") read_detection(sim_index) else NULL
@@ -146,12 +161,17 @@ plot_sim <- function(sim_index, kind = "") {
       rev <- paste(ret_edges$to, ret_edges$from, sep = "--")
       hit  <- fwd %in% detection$detected | rev %in% detection$detected
       miss <- fwd %in% detection$missed   | rev %in% detection$missed
-      ret_col <- ifelse(hit, "red", ifelse(miss, "grey50", "blue"))
+      off  <- fwd %in% detection$off_tip  | rev %in% detection$off_tip
+      ret_col <- ifelse(hit, "red", ifelse(off, "orange", ifelse(miss, "grey50", "blue")))
       ret_lty <- ifelse(hit, 1, 2)
-      ret_lwd <- 1
-      title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected")
+      ret_lwd <- ifelse(!hit & off, 2.5, 1)
+      title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected, ",
+                            sum(off), " on no tip path\n(", REPORT_WEIGHT_FIELD, ")")
     }
-    plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9)
+    plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9, tip.color = tip_color)
+    if (!all(tip_is_live)) {
+      legend("bottomleft", legend = "† not a living tip (extinct lineage)", text.col = "grey50", bty = "n", cex = 0.7)
+    }
     internal_labels <- nodes$label[match(internal_ids, nodes$id)]
     ape::nodelabels(text = internal_labels, cex = 0.6, frame = "none", col = "blue")
     # edge lengths (2 dp); zero-length edges are left unlabelled to keep the plot readable
@@ -167,8 +187,8 @@ plot_sim <- function(sim_index, kind = "") {
            cex = 0.5, col = ifelse(is.character(ret_col) & ret_col == "red", "red", "grey30"))
     }
     if (!is.null(detection) && nrow(ret_edges) > 0) {
-      legend("topleft", legend = c("retic detected", "retic missed"), col = c("red", "grey50"),
-             lty = c(1, 2), lwd = c(1, 1), bty = "n", cex = 0.7)
+      legend("topleft", legend = c("retic detected", "retic missed", "retic on no tip-to-tip shortest path"),
+             col = c("red", "grey50", "orange"), lty = c(1, 2, 2), lwd = c(1, 1, 2.5), bty = "n", cex = 0.7)
     }
   }
 

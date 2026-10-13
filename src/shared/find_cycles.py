@@ -5,8 +5,9 @@ from network_lab_tda.tda_analysis import harmonic_cycle, harmonic_cycle_snapshot
 
 
 class CycleFinder:
-    def __init__(self, G, threshold_mode, output_dir, dist_matrix, index_to_name, populated_header_fn="populated_headers.txt", sim_label="", thresholds=None, rips_threshold=float('inf')):
+    def __init__(self, G, threshold_mode, output_dir, dist_matrix, index_to_name, populated_header_fn="populated_headers.txt", sim_label="", thresholds=None, rips_threshold=float('inf'), harmonic_histories=False):
         self.G = G.to_undirected() if G.is_directed() else G
+        self.harmonic_histories = harmonic_histories
         self.dist_matrix = dist_matrix
         self.index_to_name = index_to_name
         self.index_to_node = dict(enumerate(self.G.nodes()))
@@ -54,7 +55,7 @@ class CycleFinder:
             hc = harmonic_cycle_snapshot(self.dist_matrix, thresholds=self.thresholds, cycle_dim=1, sim_log=True, log_path=log_path)
             hc.run_snapshot(save=False)
         else:
-            hc = harmonic_cycle(self.dist_matrix, cycle_dim=1, sim_log=True, log_path=log_path)
+            hc = harmonic_cycle(self.dist_matrix, cycle_dim=1, sim_log=True, log_path=log_path, histories=self.harmonic_histories)
             hc.run_harmonics(threshold=self.rips_threshold, save=True)
         self.cycle_log = hc.log
 

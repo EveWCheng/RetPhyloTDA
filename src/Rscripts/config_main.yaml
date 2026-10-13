@@ -1,3 +1,4 @@
 input_dir: "../../outputs/sim_phylo_outputs/phylo_csv"
 output_dir: "../../outputs/sim_phylo_outputs/phylo_plots"
 report_dir: "../../outputs/sim_phylo_outputs/analysis_reports"
+report_weight_field: "weight_before_projection"  # which report colours the plots: "weight" or "weight_before_projection"

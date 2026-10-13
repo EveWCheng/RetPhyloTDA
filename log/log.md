@@ -498,3 +498,89 @@ Top-1 ≈ top-3: the strongest cycle edge carries the signal. Midpoints trade pr
 coverage; 20% keeps precision, 100% is near noise.
 
 
+
+## Shared cycle edges, and reticulations off every tip path
+
+**Shared edges → same reticulation.** A reticulation shortens tip distances across it, which
+shows up in the Rips complex as one or a few short tip–tip "shortcut" edges. Several cycles can
+close through the same shortcut, so each one's top edge traces the same network path and finds
+the same reticulation. `weight_before_projection` (harmonic weight before projecting off the
+other still-alive cycles) keeps shared edges at |w| = 1 instead of diluting them, so it traces
+more paths (580 vs 444 with midpoints) but detects exactly the same reticulations (78/111 both;
+24/111 both without midpoints). Cycle count per reticulation is therefore not independent
+evidence; distinct tip pairs per reticulation would be.
+
+**Reticulations on no tip–tip shortest path.** 8/111 reticulations (sims 3, 16, 26, 27) lie on
+no shortest path between any two living tips, so no cycle edge can ever detect them. Two causes:
+(1) low `inher_weight`: in `hyb_generating` the minor parent's reticulation gets length
+`primary_inher · d12` ≈ d12, so the hybrid's own tree edge is always the shorter route (e.g.
+sim3 `hyb10 -- hyb22`, inher 0.016, 2.25 long vs `hyb22`'s 0.39 tree edge); (2) dead-end donors:
+a lineage that donated a reticulation and then went extinct is kept in the filtered graph only as
+a reticulation source (`is_leaf = False`, no tree children, e.g. sim3 `hyb10`). It has no living
+tip below it, so a path through it must leave by another of its parent or reticulation edges,
+which is almost always a detour (sim3 `-5 → hyb10 → -6` = 1.55 vs `-5 → -4 → -6` = 0.03). These now plot as grey `†` tips; off-path reticulations plot thick orange.
+
+***DATE 2026-10-13 — Extra routes per traced tip pair
+
+## Feature
+
+`main_result_analysis.route_reticulations`: besides the shortest path, each traced tip pair gets
+up to `max_routes` routes. Route i+1 is the shortest path after removing the reticulations on
+routes 1..i, kept while shorter than the tree-only distance. A pair can have two shortcuts, each
+through a different reticulation (e.g. sim29 `sp23 -- sp24`: 3.33 via `hyb14 -- -9`, 3.36 via
+`-16 -- hyb26`, tree 5.63); the shortest path alone only sees one. `max_routes = 3` in `main()`.
+
+## Results (10 tips, no midpoints, top-1 `weight_before_projection`, 111 retic edges)
+
+Pairs counted only if a reticulation lies on their shortest path; "detected" = all of them found.
+
+| tip pairs | with retic | detected, 1 route | detected, 3 routes |
+|---|--:|--:|--:|
+| shrunk >50% | 67 | 45 (67%) | 56 (84%) |
+| shrunk >25% | 229 | 81 (35%) | 125 (55%) |
+| shrunk at all | 345 | 90 (26%) | 164 (48%) |
+| all tip pairs | 349 | 92 (26%) | 166 (48%) |
+
+Retic edges detected: 24 → 42. 5 or 10 routes add nothing: traced pairs run out of shortcuts by
+route 3. Late routes can be weak (sim4 route 2 shrinks only 8%). Only 20/67 of the >50% pairs are
+traced themselves; the rest are covered because pairs share shortcuts.
+
+## Harmonic weight histories (leaders over a cycle's lifetime)
+
+**Problem.** The harmonic representative was computed only at birth. A reticulation whose shortcut
+edge enters the Rips complex while an older class is still alive never makes a new class: its edge
+is filled straight away by triangles that join it to the old class (sim19: `sp17 -- sp21` enters at
+2.73, inside the class born at 2.33, and the triangle through `hyb24` fills it). The class's birth
+representative was fixed before that edge existed, so the shortcut always had weight 0.
+
+**Fix.** Recompute each class's representative at every distinct filtration value of its lifetime:
+project the birth cycle off all boundary columns present at that value. Only triangles change the
+result. matilda's `compute_harmonic_histories` does this incrementally, with one Gram–Schmidt step
+per triangle and the update `h ← h − (q·h) q`, recording once per distinct value so tied triangles
+give a single snapshot. It skips the projection off the other still-alive classes, like
+`weight_before_projection`. Tests in network-lab-tda check it against brute-force re-projection on
+small point sets, including two triangles entering at the same value.
+
+**Output.** `harmonic_cycle(..., histories=True)` (config `harmonic_histories`) writes
+`weight_history` per cycle into `rip.json`: for each edge, `[[t, w], ...]` from birth to just
+before death. `main_result_analysis` (`leaders = "history"`) traces every tip–tip edge that is top
+|w| at any snapshot, not only the birth top-1, through the same 3 routes.
+
+| tip pairs | birth only | history leaders |
+|---|--:|--:|
+| shrunk >50% | 56/67 (84%) | 60/67 (90%) |
+| shrunk >25% | 125/229 (55%) | 134/229 (59%) |
+| all tip pairs | 166/349 (48%) | 178/349 (51%) |
+
+Retic edges detected: 42 → 47 of 111. Leaders hitting a reticulation: 51/52. The 7 large-shrink
+pairs still missed come from 4 reticulations (sim16 `-20 -- hyb44`, `-42 -- hyb48`, sim38
+`-19 -- hyb34`, sim3 `-16 -- hyb34`) that never lead any class, probably filled on entry; not yet
+checked. `"""need check"""` still marks the matilda method.
+
+Retic edges detected / all retic edges, today's changes stacked (same data):
+
+| | detected / all retic edges |
+|---|--:|
+| start (birth top-1, shortest path only) | 24/111 = 21.6% |
+| + extra routes (3 routes) | 42/111 = 37.8% |
+| + history leaders | 47/111 = 42.3% |

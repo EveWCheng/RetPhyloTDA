@@ -184,7 +184,7 @@ def main(config_path=CONFIG_PATH, gene_index: Optional[int] = None):
             distance_include_tips_changes=r['distance_include_tips_changes'],
             midpoint_top_percent=midpoint_top_percent,
         )
-        cf = CycleFinder(undirected_filtered_G_tree, threshold_mode=[], output_dir=SIM_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, sim_label=f"sim{i}", rips_threshold=float('inf'), thresholds=retic_edge_lengths)
+        cf = CycleFinder(undirected_filtered_G_tree, threshold_mode=[], output_dir=SIM_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, sim_label=f"sim{i}", rips_threshold=float('inf'), thresholds=retic_edge_lengths, harmonic_histories=config.get("harmonic_histories", False))
         cf.find_cycles()
         FilterCycle(cf, cycle_qualify_mode=[], which_nodes=which_nodes, min_cycle_length=min_cycle_length).visualize()
 
