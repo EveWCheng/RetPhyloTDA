@@ -584,3 +584,10 @@ Retic edges detected / all retic edges, today's changes stacked (same data):
 | start (birth top-1, shortest path only) | 24/111 = 21.6% |
 | + extra routes (3 routes) | 42/111 = 37.8% |
 | + history leaders | 47/111 = 42.3% |
+
+Summary:
+
+TDA is important for this because using this shortest path method we can verify that our method detects true ret edges and hence can shrink the search space meaningfully. Today we added the harmonic history to capture some ret edges that can be detected later in the filtration, and we added more shortest paths to be a better verification, which increased the detection by twice. 
+
+To explore:
+The mid point addition: especially the pairs where ret do not exist to improve accuracy. 
