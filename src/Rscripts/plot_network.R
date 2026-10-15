@@ -113,7 +113,19 @@ read_detection <- function(sim_index) {
   if (is.null(detected) || is.null(missed)) return(NULL)
   off_tip <- section_keys("^reticulate edges on no tip-to-tip shortest path")
   list(detected = detected, missed = missed, off_tip = if (is.null(off_tip)) character(0) else off_tip,
-       traced = traced_pairs(lines))
+       traced = traced_pairs(lines), detected_by = detected_by_labels(lines))
+}
+
+# "from--to" -> "(weight, time)" pairs of the leaders that detected it, one pair per line
+detected_by_labels <- function(lines) {
+  labels <- character(0)
+  matches <- regmatches(lines, regexec("^  (\\S+) -- (\\S+)  inher_weight=\\S+  detected_by=(.*)$", lines))
+  for (m in matches) {
+    if (length(m) != 4) next
+    pairs <- regmatches(m[4], gregexpr("\\([^)]*\\)", m[4]))[[1]]
+    labels[paste(m[2], m[3], sep = "--")] <- paste(pairs, collapse = "\n")
+  }
+  labels
 }
 
 # tip pairs whose shortest paths were traced: each top cycle edge, or its mid-tip parent pair(s)
@@ -179,63 +191,70 @@ plot_sim <- function(sim_index, kind = "") {
   tip_names   <- phy$tip.label
   phy$tip.label <- ifelse(tip_is_live, phy$tip.label, paste(phy$tip.label, "†"))
 
+  # ape::plot.phylo needs >= 2 tips, and a single tip has nothing worth showing, so skip it
+  if (length(phy$tip.label) < 2) {
+    cat("Skipping sim", sim_index, kind, "- only", length(phy$tip.label), "tip, nothing to plot\n")
+    return(invisible(NULL))
+  }
+
   out_file <- file.path(PLOT_DIR, paste0("sim", sim_index, "_", kind, "network.pdf"))
   pdf(out_file, encoding = "WinAnsi")  # WinAnsi has the dagger used to mark extinct lineages; the default doesn't
   on.exit(dev.off(), add = TRUE)
 
   title_label <- paste0("BDH Network - ", if (kind == "") "raw" else "filtered", " - sim", sim_index)
 
-  if (length(phy$tip.label) < 2) {
-    # ape::plot.phylo/nodelabels require >= 2 tips to set up a plot region
-    plot.new()
-    title(main = title_label)
-    text(0.5, 0.5, paste("Only", length(phy$tip.label), "tip - nothing to plot"))
-  } else {
-    # reticulations: red = on a cycle-edge path in the analysis report, grey dashed = missed,
-    # thick orange dashed = missed and on no tip-to-tip shortest path at all (so undetectable),
-    # blue = no report (same order as build_phy's phy$reticulation rows)
-    ret_edges <- edges[edges$edge_type == "reticulation", ]
-    detection <- if (kind == "filtered_") read_detection(sim_index) else NULL
-    ret_col <- "blue"; ret_lty <- 1; ret_lwd <- 1
-    if (!is.null(detection) && nrow(ret_edges) > 0) {
+  # reticulations: red = on a cycle-edge path in the analysis report, grey dashed = missed,
+  # thick orange dashed = missed and on no tip-to-tip shortest path at all (so undetectable),
+  # blue = no report (same order as build_phy's phy$reticulation rows)
+  ret_edges <- edges[edges$edge_type == "reticulation", ]
+  detection <- if (kind == "filtered_") read_detection(sim_index) else NULL
+  ret_col <- "blue"; ret_lty <- 1; ret_lwd <- 1
+  if (!is.null(detection) && nrow(ret_edges) > 0) {
+    fwd <- paste(ret_edges$from, ret_edges$to, sep = "--")
+    rev <- paste(ret_edges$to, ret_edges$from, sep = "--")
+    hit  <- fwd %in% detection$detected | rev %in% detection$detected
+    miss <- fwd %in% detection$missed   | rev %in% detection$missed
+    off  <- fwd %in% detection$off_tip  | rev %in% detection$off_tip
+    ret_col <- ifelse(hit, "red", ifelse(off, "orange", ifelse(miss, "grey50", "blue")))
+    ret_lty <- ifelse(hit, 1, 2)
+    ret_lwd <- ifelse(!hit & off, 2.5, 1)
+    title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected, ",
+                          sum(off), " on no tip path\n(", REPORT_WEIGHT_FIELD, ")")
+  }
+  traced <- if (!is.null(detection)) Filter(function(p) all(p %in% tip_names), detection$traced) else list()
+  depth  <- max(ape::node.depth.edgelength(phy))
+  x_lim  <- if (length(traced) > 0) c(0, depth * (1.5 + 0.06 * length(traced))) else NULL
+  plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9, tip.color = tip_color,
+       x.lim = x_lim)
+  if (length(traced) > 0) draw_traced_pairs(traced, tip_names, phy$tip.label)
+  if (!all(tip_is_live)) {
+    legend("bottomleft", legend = "† not a living tip (extinct lineage)", text.col = "grey50", bty = "n", cex = 0.7)
+  }
+  internal_labels <- nodes$label[match(internal_ids, nodes$id)]
+  ape::nodelabels(text = internal_labels, cex = 0.6, frame = "none", col = "blue")
+  # edge lengths (2 dp); zero-length edges are left unlabelled to keep the plot readable
+  tree_len <- phy$edge.length
+  ape::edgelabels(text = ifelse(tree_len > 0, formatC(tree_len, format = "f", digits = 2), ""),
+                  cex = 0.5, frame = "none", adj = c(0.5, -0.4), col = "darkgreen")
+  if (!is.null(phy$reticulation)) {
+    # ape has no labeller for reticulation lines, so place each length at its line's midpoint
+    lp <- get("last_plot.phylo", envir = ape::.PlotPhyloEnv)
+    mid_x <- (lp$xx[phy$reticulation[, 1]] + lp$xx[phy$reticulation[, 2]]) / 2
+    mid_y <- (lp$yy[phy$reticulation[, 1]] + lp$yy[phy$reticulation[, 2]]) / 2
+    text(mid_x, mid_y, formatC(phy$reticulation.length, format = "f", digits = 2),
+         cex = 0.5, col = ifelse(is.character(ret_col) & ret_col == "red", "red", "grey30"))
+    # (leader weight, time it first led) for each leader that detected the reticulation, under its length
+    if (!is.null(detection) && length(detection$detected_by) > 0) {
       fwd <- paste(ret_edges$from, ret_edges$to, sep = "--")
       rev <- paste(ret_edges$to, ret_edges$from, sep = "--")
-      hit  <- fwd %in% detection$detected | rev %in% detection$detected
-      miss <- fwd %in% detection$missed   | rev %in% detection$missed
-      off  <- fwd %in% detection$off_tip  | rev %in% detection$off_tip
-      ret_col <- ifelse(hit, "red", ifelse(off, "orange", ifelse(miss, "grey50", "blue")))
-      ret_lty <- ifelse(hit, 1, 2)
-      ret_lwd <- ifelse(!hit & off, 2.5, 1)
-      title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected, ",
-                            sum(off), " on no tip path\n(", REPORT_WEIGHT_FIELD, ")")
+      leader_text <- ifelse(fwd %in% names(detection$detected_by), detection$detected_by[fwd],
+                            ifelse(rev %in% names(detection$detected_by), detection$detected_by[rev], ""))
+      text(mid_x, mid_y, leader_text, cex = 0.4, col = "red", adj = c(0.5, 1.4))
     }
-    traced <- if (!is.null(detection)) Filter(function(p) all(p %in% tip_names), detection$traced) else list()
-    depth  <- max(ape::node.depth.edgelength(phy))
-    x_lim  <- if (length(traced) > 0) c(0, depth * (1.5 + 0.06 * length(traced))) else NULL
-    plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9, tip.color = tip_color,
-         x.lim = x_lim)
-    if (length(traced) > 0) draw_traced_pairs(traced, tip_names, phy$tip.label)
-    if (!all(tip_is_live)) {
-      legend("bottomleft", legend = "† not a living tip (extinct lineage)", text.col = "grey50", bty = "n", cex = 0.7)
-    }
-    internal_labels <- nodes$label[match(internal_ids, nodes$id)]
-    ape::nodelabels(text = internal_labels, cex = 0.6, frame = "none", col = "blue")
-    # edge lengths (2 dp); zero-length edges are left unlabelled to keep the plot readable
-    tree_len <- phy$edge.length
-    ape::edgelabels(text = ifelse(tree_len > 0, formatC(tree_len, format = "f", digits = 2), ""),
-                    cex = 0.5, frame = "none", adj = c(0.5, -0.4), col = "darkgreen")
-    if (!is.null(phy$reticulation)) {
-      # ape has no labeller for reticulation lines, so place each length at its line's midpoint
-      lp <- get("last_plot.phylo", envir = ape::.PlotPhyloEnv)
-      mid_x <- (lp$xx[phy$reticulation[, 1]] + lp$xx[phy$reticulation[, 2]]) / 2
-      mid_y <- (lp$yy[phy$reticulation[, 1]] + lp$yy[phy$reticulation[, 2]]) / 2
-      text(mid_x, mid_y, formatC(phy$reticulation.length, format = "f", digits = 2),
-           cex = 0.5, col = ifelse(is.character(ret_col) & ret_col == "red", "red", "grey30"))
-    }
-    if (!is.null(detection) && nrow(ret_edges) > 0) {
-      legend("topleft", legend = c("retic detected", "retic missed", "retic on no tip-to-tip shortest path"),
-             col = c("red", "grey50", "orange"), lty = c(1, 2, 2), lwd = c(1, 1, 2.5), bty = "n", cex = 0.7)
-    }
+  }
+  if (!is.null(detection) && nrow(ret_edges) > 0) {
+    legend("topleft", legend = c("retic detected", "retic missed", "retic on no tip-to-tip shortest path"),
+           col = c("red", "grey50", "orange"), lty = c(1, 2, 2), lwd = c(1, 1, 2.5), bty = "n", cex = 0.7)
   }
 
   cat("Plot written to", out_file, "\n")

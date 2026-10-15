@@ -591,3 +591,97 @@ TDA is important for this because using this shortest path method we can verify 
 
 To explore:
 The mid point addition: especially the pairs where ret do not exist to improve accuracy. 
+
+***DATE 2026-10-14 — Midpoint ratio sweep: detection vs noise
+
+## Setup
+
+Same seed-42 networks (41 sims, 10 tips, 111 retic edges), top-1 `weight_before_projection`,
+history leaders, 3 routes. Swept `midpoint_top_percent` 10–70% in steps of 10, parsing the
+`analysis_reports`. 0% is `add_midpoints = false` (`midpoint_top_percent = 0` would still add one
+midpoint per sim via `max(1, …)`).
+
+- **Detected**: retic edges on at least one top-1 cycle-edge path.
+- **Excl. undetectable**: drops retic edges that are missed *and* on no tip–tip shortest path
+  (7 at 0–20%, 6 from 30%: one off-path edge gets picked up via a mid-tip path).
+- **Noise (tip pairs)**: distinct traced tip pairs per sim (mid-tip edges map to their parent
+  pair) whose path has no retic edge.
+- **Noise (listings)**: same, but every printed path listing counts, so pairs repeated across
+  cycles or both mid-tip halves count more than once.
+
+## Results
+
+| midpoints | retic detected | excl. undetectable | noise (tip pairs) | noise (listings) |
+|--:|--:|--:|--:|--:|
+| 0% | 47/111 = 42.3% | 47/104 = 45.2% | 1/52 = 1.9% | 1/52 = 1.9% |
+| 10% | 69/111 = 62.2% | 69/104 = 66.3% | 8/109 = 7.3% | 8/382 = 2.1% |
+| 20% | 86/111 = 77.5% | 86/104 = 82.7% | 12/168 = 7.1% | 19/604 = 3.1% |
+| 30% | 96/111 = 86.5% | 96/105 = 91.4% | 22/237 = 9.3% | 37/851 = 4.3% |
+| 40% | 99/111 = 89.2% | 99/105 = 94.3% | 39/302 = 12.9% | 84/1014 = 8.3% |
+| 50% | 103/111 = 92.8% | 103/105 = 98.1% | 67/381 = 17.6% | 187/1206 = 15.5% |
+| 60% | 103/111 = 92.8% | 103/105 = 98.1% | 91/431 = 21.1% | 240/1251 = 19.2% |
+| 70% | 104/111 = 93.7% | 104/105 = 99.0% | 135/495 = 27.3% | 328/1342 = 24.4% |
+
+Caveat: ~10 mid-tip listings trace two parent paths at once, and the report prints the union of
+their edges, so a pair with no retic edge can be hidden behind its partner's retic edge.
+
+***DATE 2026-10-15 — Aligned histories, shrink filter, why reticulations are missed
+
+## Code changes (not committed yet)
+
+- **History format:** matilda's `compute_harmonic_histories` now writes every edge at every
+  snapshot of its cycle, zero-padded before the edge first appears, so all edges share one time
+  axis. New test `test_every_seen_face_recorded_at_every_snapshot`.
+- **`history_leaders` rewritten:** written for readability, keeps ties (within 1e-9), reports
+  |weight|. Gives the same leaders as the old version on every sim.
+- **Pairs that didn't shrink are filtered out:** `main_result_analysis.py` skips any history
+  leader whose tip pair (or a mid-tip's parent pair) has no shrink in
+  `distance_include_tips_changes.json`. Removed 2 stray pairs (sims 18, 27); detected
+  reticulations unchanged.
+- **Report:** each detected reticulation lists `detected_by=(weight, time)` for the leaders that
+  found it; `plot_network.R` prints them under the reticulation's length.
+- **R plots:** sims with fewer than 2 tips are skipped instead of getting a blank PDF.
+
+## Findings
+
+- **Age vs detection:** a reticulation's age shows no reliable link to whether or when it's
+  detected. Inheritance weight and shrink size predict detection much better.
+- **Missed reticulations:** usually low inheritance, so small shrinks that get filled before they
+  form a cycle. When the hybrid's parents split long ago, older ancestor nodes can fill the loop
+  (sim18 `-10 -- hyb14`: `-3`, `-2` and `hyb8` fill it on entry).
+- **Sims with zero cycles:** single reticulations with a one-sided inheritance split get filled
+  straight away, by the common ancestor or by the hybrid's blended distances.
+- **Midpoint cycles:** a midpoint's cycle lives from half the true distance to half the tree
+  distance, so its lifetime is half the shrink (sim8: 0.676 → 0.821).
+- **Remaining redundant pairs:** the ones checked, from midpoints and from midpoints combined
+  with harmonic histories, come from a hybrid shrinking a tip-to-tip distance through blending,
+  while no reticulation lies on the shortest path between the two tips (sim8 `hyb18 -- sp9`:
+  true 1.353, tree 1.642, via the reticulation 3.01). They are real reticulation signal that the
+  shortest-path check can't credit. The 5 small-shrink history leaders that appeared at 10%
+  haven't been checked yet.
+- **Lead time doesn't separate real from redundant history leaders** (p = 0.56), so it isn't a
+  useful filter.
+
+## Results (`stopping_num_leaves = 14`, 200 retic edges, 191 on a tip–tip shortest path)
+
+| midpoints | success rate | redundant midpoint pairs | redundant ordinary pairs |
+|---|--:|--:|--:|
+| 0% | 125/191 = 65.4% | N/A | 2/189 = 1% |
+| 10% | 138/191 = 72.3% | 0/451 = 0% | 7/75 = 9% |
+| 20% / 30% | still running | | |
+
+Detection rate by the largest shrink among tip pairs whose shortest path uses the reticulation
+(10% midpoints):
+
+| shrink | detected | missed | rate |
+|---|--:|--:|--:|
+| >60% | 52 | 0 | 100% |
+| 50–60% | 39 | 5 | 89% |
+| 40–50% | 20 | 8 | 71% |
+| 30–40% | 14 | 12 | 54% |
+| 20–30% | 8 | 16 | 33% |
+| 10–20% | 3 | 6 | 33% |
+| <10% | 2 | 6 | 25% |
+
+None of the 53 missed reticulations has a pair in its sim's top 10% of shrinks, so at 10% they
+mostly just didn't get a midpoint slot.

@@ -191,25 +191,36 @@ def reticulate_edges_off_tip_paths(net, retic_edges, tol=1e-9):
 
 
 def history_leaders(cycle, is_tip, tol=1e-9):
-    """Tip-tip edges with top |weight| at any snapshot, with first lead time, lead share and weight."""
-    history = {edge: points for edge, points in cycle["history"].items() if all(is_tip(n) for n in edge)}
-    times = sorted({t for points in history.values() for t, _ in points})
-    if not times:
+    """For each snapshot time, every tip-tip edge tied (within tol) for the highest |weight|, with that |weight|."""
+    tip_histories = {}
+    for edge, points in cycle["history"].items():
+        u, v = edge
+        if is_tip(u) and is_tip(v):
+            tip_histories[edge] = points
+    if not tip_histories:
         return []
-    end = cycle["death"] if cycle["death"] is not None else times[-1]
-    lifetime = end - cycle["birth"]
-    leaders = {}
-    for i, t in enumerate(times):
-        state = {edge: abs([w for s, w in points if s <= t][-1]) for edge, points in history.items() if points[0][0] <= t}
-        best = max(state.values(), default=0.0)
-        if best <= tol:
+
+    first_points = next(iter(tip_histories.values()))
+    snapshot_times = [t for t, _ in first_points]
+    for edge, points in tip_histories.items():
+        if len(points) != len(snapshot_times):
+            raise ValueError(f"edge {edge} history is not aligned to the snapshots; regenerate rip.json")
+
+    leaders = []
+    for i, t in enumerate(snapshot_times):
+        highest = 0.0
+        for edge, points in tip_histories.items():
+            weight = points[i][1]
+            if abs(weight) > highest:
+                highest = abs(weight)
+        if highest <= tol:
             continue
-        span = (times[i + 1] if i + 1 < len(times) else end) - t
-        for edge, w in state.items():
-            if w >= best - tol:
-                lead = leaders.setdefault(edge, {"edge": edge, "first": t, "lead": 0.0, "weight": w})
-                lead["lead"] += span / lifetime if lifetime > 0 else 1.0
-    return sorted(leaders.values(), key=lambda lead: lead["first"])
+
+        for edge, points in tip_histories.items():
+            weight = points[i][1]
+            if abs(weight) >= highest - tol:
+                leaders.append({"time": t, "edge": edge, "weight": abs(weight)})
+    return leaders
 
 
 def top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only, max_routes=1, leaders="birth"):
@@ -217,6 +228,7 @@ def top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only, max_routes=1, l
     net = read_network_graph(sim_id)
     tree = tree_only_graph(net) if net is not None else None
     mid_tips = read_midpoints(sim_id)
+    shrunk_pairs = read_shrunk_pairs(sim_id)
     result = []
     for cycle in cycles:
         edges = cycle["edges"]
@@ -224,8 +236,15 @@ def top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only, max_routes=1, l
             edges = [e for e in edges if all(n in mid_tips or (n in net and net.nodes[n]["is_leaf"]) for n in e["nodes"])]
         if leaders == "history" and cycle["history"] and net is not None:
             is_tip = lambda n: n in mid_tips or (n in net and net.nodes[n]["is_leaf"])
-            chosen = [{"nodes": list(lead["edge"]), "weight": lead["weight"], "first": lead["first"], "lead": lead["lead"]}
-                      for lead in history_leaders(cycle, is_tip)]
+            first_lead_by_edge = {}
+            for leader in history_leaders(cycle, is_tip):
+                edge = leader["edge"]
+                traced = [mid_tips[n] for n in edge if n in mid_tips] or [edge]
+                if not any(frozenset(pair) in shrunk_pairs for pair in traced):
+                    continue
+                if edge not in first_lead_by_edge:
+                    first_lead_by_edge[edge] = {"nodes": list(edge), "weight": leader["weight"], "first": leader["time"]}
+            chosen = list(first_lead_by_edge.values())
         else:
             ranked = sorted(edges, key=lambda e: abs(e["weight"]), reverse=True)
             cutoff = abs(ranked[top_k - 1]["weight"]) if len(ranked) >= top_k else 0.0
@@ -244,7 +263,7 @@ def top_cycle_edge_paths(sim_id, cycles, top_k, tip_to_tip_only, max_routes=1, l
                     path += [p for p in part if p not in path]
                 routes = {(a, b): route_reticulations(net, tree, a, b, max_routes) for a, b in traced}
             entries.append({"edge": (u, v), "weight": edge["weight"], "path": path, "traced": traced, "routes": routes,
-                            "first": edge.get("first"), "lead": edge.get("lead")})
+                            "first": edge.get("first")})
         result.append(entries)
     return result
 
@@ -288,6 +307,21 @@ def read_midpoints(sim_id):
         return {}
     with open(path) as f:
         return {m["name"]: tuple(m["parents"]) for m in json.load(f) if m["type"] == "mid-tip"}
+
+
+def read_shrunk_pairs(sim_id, tol=1e-6):
+    """Tip pairs whose simulated distance is shorter than their tree-only distance."""
+    path = os.path.join(PROC_OUTPUTS_DIR, f"sim{sim_id}", "distance_include_tips_changes.json")
+    if not os.path.exists(path):
+        return set()
+    with open(path) as f:
+        changes = json.load(f)
+    shrunk = set()
+    for key, change in changes.items():
+        if change["ratio"] < -tol:
+            a, b = key.split("--")
+            shrunk.add(frozenset((a, b)))
+    return shrunk
 
 
 def read_leaf_labels(sim_id):
@@ -373,7 +407,7 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only, weight_field="weight", max_
         lines.append(f"  cycle {i}:")
         for entry in entries:
             u, v = entry["edge"]
-            lead = f"  leads from t={entry['first']:.4f} for {entry['lead']:.0%} of lifetime" if entry["first"] is not None else ""
+            lead = f"  leads from t={entry['first']:.4f}" if entry["first"] is not None else ""
             lines.append(f"    {u} -- {v}  weight={entry['weight']}{lead}")
             if entry["traced"] != [(u, v)]:
                 lines.append("      (mid-tip: traced parent path " + ", ".join(f"{a} -- {b}" for a, b in entry["traced"]) + ")")
@@ -388,26 +422,38 @@ def write_sim_report(sim_id, top_k, tip_to_tip_only, weight_field="weight", max_
                     retics = ", ".join(" -- ".join(sorted(r)) for r in route["retics"])
                     lines.append(f"      route {n} {a} -- {b}: length={route['length']:.4f}  shrink={route['shrink']:+.1%}  via {retics}")
 
-    reticulation_on_paths = {
-        frozenset((a, b))
-        for entries in top_paths
-        for entry in entries if entry["path"]
-        for a, b, edge_type, _ in entry["path"]
-        if edge_type == "reticulation"
-    } | {
-        r
-        for entries in top_paths
-        for entry in entries
-        for routes in entry["routes"].values()
-        for route in routes
-        for r in route["retics"]
-    }
+    leaders_by_reticulation = {}
+    for entries in top_paths:
+        for entry in entries:
+            found = set()
+            if entry["path"]:
+                for a, b, edge_type, _ in entry["path"]:
+                    if edge_type == "reticulation":
+                        found.add(frozenset((a, b)))
+            for routes in entry["routes"].values():
+                for route in routes:
+                    for reticulation in route["retics"]:
+                        found.add(reticulation)
+            for reticulation in found:
+                leaders = leaders_by_reticulation.setdefault(reticulation, [])
+                leader = (entry["weight"], entry["first"])
+                if leader not in leaders:
+                    leaders.append(leader)
+    reticulation_on_paths = set(leaders_by_reticulation)
+
     involved = [edge for edge in retic_edges if frozenset(edge[:2]) in reticulation_on_paths]
     missing = [edge for edge in retic_edges if frozenset(edge[:2]) not in reticulation_on_paths]
     lines.append("")
     lines.append(f"reticulate edges on at least one top-{top_k} cycle-edge path ({len(involved)}):")
     for edge in involved:
-        lines.append(f"  {edge[0]} -- {edge[1]}  inher_weight={edge[2]}")
+        detected_by = ""
+        pairs = []
+        for weight, time in leaders_by_reticulation[frozenset(edge[:2])]:
+            if time is not None:
+                pairs.append(f"({weight:.4f}, {time:.4f})")
+        if pairs:
+            detected_by = "  detected_by=" + " ".join(pairs)
+        lines.append(f"  {edge[0]} -- {edge[1]}  inher_weight={edge[2]}{detected_by}")
     lines.append(f"reticulate edges on no top-{top_k} cycle-edge path ({len(missing)}):")
     for edge in missing:
         lines.append(f"  {edge[0]} -- {edge[1]}  inher_weight={edge[2]}")
