@@ -17,6 +17,6 @@ min_cycle_length = 0
 # midpoint hybrids: add a point between the top midpoint_top_percent% tip pairs (most shortened ratio first, ties to the longest tree path),
 # at 0.5*d(A, k) + 0.5*d(B, k) from every node k. When on, build_dist_matrix skips data prep.
 add_midpoints = true
-midpoint_top_percent = 30
+midpoint_top_percent = 10
 harmonic_histories = true  # log each cycle's per-edge harmonic weight history in rip.json
 weight_attr = "length" # edge attribute CycleFinder measures distance with: "length" (genetic) or "time_length" (time). Should always be length

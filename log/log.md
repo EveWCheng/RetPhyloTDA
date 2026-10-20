@@ -668,7 +668,8 @@ their edges, so a pair with no retic edge can be hidden behind its partner's ret
 |---|--:|--:|--:|
 | 0% | 125/191 = 65.4% | N/A | 2/189 = 1% |
 | 10% | 138/191 = 72.3% | 0/451 = 0% | 7/75 = 9% |
-| 20% / 30% | still running | | |
+| 20% | 161/191 = 84.3% | 0/788 = 0% | 14/70 = 20% |
+| 30% | 173/191 = 90.6% | 33/1142 = 3% | 10/43 = 23% |
 
 Detection rate by the largest shrink among tip pairs whose shortest path uses the reticulation
 (10% midpoints):
