@@ -12,27 +12,20 @@ class CycleFinder:
         self.index_to_name = index_to_name
         self.index_to_node = dict(enumerate(self.G.nodes()))
         self.populated_header_fn = populated_header_fn
-        # cap on the Rips filtration passed to harmonic_cycle.run_harmonics() in the
-        # non-"fixed" threshold_mode branch; float('inf') (default) reproduces the old
-        # uncapped behavior (builds the complete simplex on every point). Callers can
-        # pass e.g. the longest single edge length in G to prune the complex.
+        #the limit on the threshold for rips filtration (the last epsilon)
         self.rips_threshold = rips_threshold
         self.sim_label = sim_label
-        # list of threshold-selection strategies; only "fixed" affects find_cycles()
-        # itself (selects harmonic_cycle_snapshot over harmonic_cycle below). The
-        # rest ("cyclelength", "marker") are FilterCycle-only concerns.
+        # list of threshold-selection strategies; only "fixed" affects find_cycles() itself (selects harmonic_cycle_snapshot over harmonic_cycle below). Therest ("cyclelength", "marker") are FilterCycle-only concerns.
         self.threshold_mode = threshold_mode
         self.thresholds = thresholds if thresholds is not None else []
-        # running log accumulated throughout find_cycles(); flushed as JSON to
-        # self.output_path/find_cycles_log.json at the end of find_cycles()
+        # running log accumulated throughout find_cycles(); flushed as JSON to self.output_path/find_cycles_log.json at the end of find_cycles()
         self.log = {}
 
         self.output_path = os.path.join(output_dir, "proc_phylo_outputs", sim_label)
         self.cycle_output_path = os.path.join(output_dir, "cycle_outputs", sim_label)
 
     def _log(self, key, value):
-        """Record key -> value in self.log (JSON-serialised on write) and echo it."""
-        print(f"{key}: {value}")
+        """Record key -> value in self.log (JSON-serialised on write)"""
         self.log[key] = value
 
     def _write_log(self):

@@ -67,6 +67,7 @@ class FilterCycle:
     def thresholds(self):
         return self.cycle_finder.thresholds
 
+    """add all nodes that are in an edge with weight more than ZERO_TOL"""
     def _marker_nodes(self, cycle):
         names = set()
         for edge in cycle["edges"]:
@@ -79,8 +80,8 @@ class FilterCycle:
         return names
 
     def _select_threshold_cyclelength(self,cycle):
-            edges = [(edge["simplex"], edge["weight"]) for edge in cycle["edges"] if abs(edge["weight"]) > self.WEIGHT_ZERO_TOL]
-            return len(edges) > self.min_cycle_length
+        edges = [(edge["simplex"], edge["weight"]) for edge in cycle["edges"] if abs(edge["weight"]) > self.WEIGHT_ZERO_TOL]
+        return len(edges) > self.min_cycle_length
 
     def _select_threshold_marker(self,cycle):
         marker_nodes = self._marker_nodes(cycle)
