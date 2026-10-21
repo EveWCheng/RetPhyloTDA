@@ -158,9 +158,10 @@ def main(seed=43, which_nodes: str = "no_hyb_nodes"):
         if os.path.exists(TREE_GROUP_OUTPUTS_DIR):
             shutil.rmtree(TREE_GROUP_OUTPUTS_DIR)
         os.makedirs(TREE_GROUP_OUTPUTS_DIR, exist_ok=True)
-        export_csv(phy.G, PHYLO_CSV_DIR, prefix="sim0_")
+        sim_csv_dir = os.path.join(PHYLO_CSV_DIR, "sim0")
+        export_csv(phy.G, sim_csv_dir, prefix="sim0_")
         filtered_G = phy.filter_nodes(which_nodes=which_nodes)
-        export_csv(filtered_G, PHYLO_CSV_DIR, prefix="sim0_filtered_", by_label=True)
+        export_csv(filtered_G, sim_csv_dir, prefix="sim0_filtered_", by_label=True)
         leaf_labels = leaf_labels_by_number(filtered_G)
         merged_G,enumerated_trees  = process_gene_trees(phy, which_nodes=which_nodes)
         print("the gene trees have been merged")

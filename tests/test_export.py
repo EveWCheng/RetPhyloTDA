@@ -20,7 +20,7 @@ def _phy():
 
 
 def test_export_csv_is_leaf_column_reflects_live_flag_not_type(tmp_path):
-    export_csv(_phy(), str(tmp_path), prefix="sim0_")
+    export_csv(_phy().G, str(tmp_path), prefix="sim0_")
     rows = {r["label"]: r for r in csv.DictReader(open(tmp_path / "sim0_nodes.csv"))}
 
     # the speciated former hybrid: display 'type' still hyb_leaf, but is_leaf is False

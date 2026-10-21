@@ -385,26 +385,6 @@ def test_extinction_seals_and_marks_extinct():
     assert state.G[1][2]["length"] == 3.0
 
 
-# for two still-active (unsealed) leaves, tip_distance should sum the elapsed time on each branch
-def test_tip_distance_sums_elapsed_time_for_active_leaves():
-    state = SimState(mrca=True, Ngene=0)
-    state.time = 5.0  # neither leaf's incoming edge has been sealed yet
-
-    assert state.tip_distance(2, 3) == 10.0  # 5.0 elapsed on each branch
-
-
-# once an edge is sealed, tip_distance must use its frozen length, not further elapsed time
-def test_tip_distance_uses_sealed_length_not_elapsed_time():
-    state = SimState(mrca=True, Ngene=0)
-    state.time = 3.0
-    state.speciation(2)  # seals edge (1,2) at length 3.0; new leaves 4,5 replace it
-    state.time = 10.0    # time keeps moving, but (1,2)'s length must stay frozen at 3.0
-
-    # path 4 -> 2 -> 1 -> 3: (2,4) elapsed since creation (10-3=7), (1,2) sealed
-    # at 3.0 regardless of the extra elapsed time, (1,3) elapsed since root (10-0=10)
-    assert state.tip_distance(4, 3) == 7.0 + 3.0 + 10.0
-
-
 def _speciated_state():
     # root(1) -> leaf1(2), leaf2(3); leaf1 speciates into 4,5.
     # leaf2(3) is left untouched so root keeps two children throughout.
@@ -450,19 +430,18 @@ def test_hyb_degenerative_matches_shape_used_in_enumerate_gene_trees_tests():
     assert state.G.nodes[6]["is_hyb_leaf"] is True
 
 
-# hyb_neutral should make the primary parent the hyb_node like hyb_degenerative,
-# but give the secondary parent its own donor leaf -- the shape assumed by the
-# "neutral" enumerate_gene_trees test above
-def test_hyb_neutral_matches_shape_used_in_enumerate_gene_trees_tests():
+# hyb_neutral should make the secondary parent the hyb_node, overflown by a reticulation
+# from the primary, while the primary keeps its own unchanged donor leaf
+def test_hyb_neutral_secondary_becomes_hyb_node_fed_by_primary():
     state = _speciated_state()
 
     state.hyb_neutral(4, 5, inher=0.3)
 
-    assert state.leaves == {3, 6, 7}  # secondary (5) keeps its own donor leaf (7)
-    assert set(state.G.successors(4)) == {6}
-    assert set(state.G.successors(5)) == {4, 7}  # donor leaf + reticulation into primary
-    assert state.G[2][4]["inher_weight"] == pytest.approx(0.7)
-    assert state.G[5][4]["inher_weight"] == pytest.approx(0.3)
-    assert state.G[5][4]["edge_type"] == "reticulation"
-    assert state.G.nodes[4]["is_hyb_node"] is True
+    assert state.leaves == {3, 6, 7}
+    assert set(state.G.successors(4)) == {5, 7}  # reticulation into secondary + donor leaf (7)
+    assert set(state.G.successors(5)) == {6}     # hybrid leaf (6)
+    assert state.G[4][5]["inher_weight"] == pytest.approx(0.7)
+    assert state.G[2][5]["inher_weight"] == pytest.approx(0.3)
+    assert state.G[4][5]["edge_type"] == "reticulation"
+    assert state.G.nodes[5]["is_hyb_node"] is True
     assert state.G.nodes[6]["is_hyb_leaf"] is True

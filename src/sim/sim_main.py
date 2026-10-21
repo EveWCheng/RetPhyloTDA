@@ -54,8 +54,9 @@ def sim_bdh_age(age: float, numbsim: int,
     return results
 
 
-hyb_inher_fxn = lambda: np.random.uniform(0, 1)
-hyb_rate_fxn  = None
+def hyb_inher_fxn():
+    """Draw a hybrid inheritance proportion uniformly from [0, 1]."""
+    return np.random.uniform(0, 1)
 
 
 def should_populate_fxn(u, v, attrs):
@@ -109,7 +110,7 @@ def build_dist_matrix(G, distance_include_tips, distance_only_tips, use_data_pre
             for v, d in row.items():
                 dist_matrix[node_to_index[u], node_to_index[v]] = d
     else:
-        dist_matrix = _dist_matrix_from_dict(G, distance_include_tips)
+        dist_matrix = _dist_matrix_from_dict(list(G.nodes()), distance_include_tips)
         index_to_name = {
             i: attrs.get("label", node)
             for i, (node, attrs) in enumerate(G.nodes(data=True))
@@ -122,13 +123,48 @@ def build_dist_matrix(G, distance_include_tips, distance_only_tips, use_data_pre
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
-def main(config_path=CONFIG_PATH, gene_index: Optional[int] = None):
-    config = load_config(config_path)
-    seed = config["seed"]
+def run_one_sim(i, r, config):
+    """Export one simulated network, build its distance matrix, find cycles and optionally plot them."""
     which_nodes = config["which_nodes"]
     weight_attr = config["weight_attr"]
     min_cycle_length = config["min_cycle_length"]
+    vis = config["vis"]
     midpoint_top_percent = config["midpoint_top_percent"] if config["add_midpoints"] else None
+
+    print(f"sim{i}: not extinct")
+
+    filtered_G = r['filtered_G']
+
+    sim_csv_dir = os.path.join(PHYLO_CSV_DIR, f"sim{i}")
+    export_csv(filtered_G, sim_csv_dir, prefix=f"sim{i}_filtered_", by_label=True)
+    undirected_filtered_G_tree = r['tree_only_G'].to_undirected()
+
+    output_path = os.path.join(SIM_OUTPUTS_DIR, "proc_phylo_outputs", f"sim{i}")
+    os.makedirs(output_path, exist_ok=True)
+
+    write_distance_include_tips_changes(filtered_G, r['distance_include_tips_changes'], output_path)
+
+    dist_matrix, index_to_name = build_dist_matrix(
+        undirected_filtered_G_tree,
+        r['distance_include_tips'],
+        r['distance_only_tips'],
+        use_data_prep=False,
+        weight_attr=weight_attr,
+        output_path=output_path,
+        should_populate_fxn=should_populate_fxn,
+        distance_include_tips_changes=r['distance_include_tips_changes'],
+        midpoint_top_percent=midpoint_top_percent,
+    )
+    cf = CycleFinder(undirected_filtered_G_tree, threshold_mode=[], output_dir=SIM_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, sim_label=f"sim{i}", rips_threshold=float('inf'), thresholds=None, harmonic_histories=config.get("harmonic_histories", False))
+    cf.find_cycles()
+    if vis:
+        FilterCycle(cf, cycle_qualify_mode=[], which_nodes=which_nodes, min_cycle_length=min_cycle_length).visualize()
+
+
+def main(config_path=CONFIG_PATH):
+    """Run every simulation from the config, then process each surviving network."""
+    config = load_config(config_path)
+    seed = config["seed"]
 
     if seed is not None:
         np.random.seed(seed)
@@ -146,47 +182,16 @@ def main(config_path=CONFIG_PATH, gene_index: Optional[int] = None):
         hybprops=config["hybprops"],
         hyb_inher_fxn=hyb_inher_fxn,
         mrca=False,
-        hyb_rate_fxn=hyb_rate_fxn,  # None
+        hyb_rate_fxn=None,
         Ngene=0,
         trait_model=None,
         stopping_num_leaves=config["stopping_num_leaves"],
-        which_nodes=which_nodes,
+        which_nodes=config["which_nodes"],
     )
     print(f"length of results:{len(results)}")
 
     for i, r in enumerate(results):
-        print(f"sim{i}: not extinct")
-
-        filtered_G = r['filtered_G']
-
-        export_csv(filtered_G, PHYLO_CSV_DIR, prefix=f"sim{i}_filtered_", by_label=True)
-        max_edge_length = max(d for _, _, d in filtered_G.edges(data=weight_attr))
-        # snapshot the network at each reticulation edge's own length, in addition to cycle-birth thresholds (CycleFinder appends those automatically since "fixed" isn't in threshold_mode)
-        retic_edge_lengths = [
-            attrs[weight_attr]+1e-2 for _, _, attrs in filtered_G.edges(data=True) if attrs.get("edge_type") == "reticulation"
-        ]
-        print(retic_edge_lengths)
-        undirected_filtered_G_tree = r['tree_only_G'].to_undirected()
-
-        output_path = os.path.join(SIM_OUTPUTS_DIR, "proc_phylo_outputs", f"sim{i}")
-        os.makedirs(output_path, exist_ok=True)
-
-        write_distance_include_tips_changes(filtered_G, r['distance_include_tips_changes'], output_path)
-
-        dist_matrix, index_to_name = build_dist_matrix(
-            undirected_filtered_G_tree,
-            r['distance_include_tips'],
-            r['distance_only_tips'],
-            use_data_prep=False,
-            weight_attr=weight_attr,
-            output_path=output_path,
-            should_populate_fxn=should_populate_fxn,
-            distance_include_tips_changes=r['distance_include_tips_changes'],
-            midpoint_top_percent=midpoint_top_percent,
-        )
-        cf = CycleFinder(undirected_filtered_G_tree, threshold_mode=[], output_dir=SIM_OUTPUTS_DIR, dist_matrix=dist_matrix, index_to_name=index_to_name, sim_label=f"sim{i}", rips_threshold=float('inf'), thresholds=retic_edge_lengths, harmonic_histories=config.get("harmonic_histories", False))
-        cf.find_cycles()
-        FilterCycle(cf, cycle_qualify_mode=[], which_nodes=which_nodes, min_cycle_length=min_cycle_length).visualize()
+        run_one_sim(i, r, config)
 
 
 if __name__ == "__main__":

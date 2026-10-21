@@ -1,5 +1,4 @@
 import os
-import json
 import warnings
 from network_lab_tda.tda_analysis import harmonic_cycle, harmonic_cycle_snapshot
 
@@ -18,20 +17,9 @@ class CycleFinder:
         # list of threshold-selection strategies; only "fixed" affects find_cycles() itself (selects harmonic_cycle_snapshot over harmonic_cycle below). Therest ("cyclelength", "marker") are FilterCycle-only concerns.
         self.threshold_mode = threshold_mode
         self.thresholds = thresholds if thresholds is not None else []
-        # running log accumulated throughout find_cycles(); flushed as JSON to self.output_path/find_cycles_log.json at the end of find_cycles()
-        self.log = {}
 
         self.output_path = os.path.join(output_dir, "proc_phylo_outputs", sim_label)
         self.cycle_output_path = os.path.join(output_dir, "cycle_outputs", sim_label)
-
-    def _log(self, key, value):
-        """Record key -> value in self.log (JSON-serialised on write)"""
-        self.log[key] = value
-
-    def _write_log(self):
-        log_file = os.path.join(self.output_path, "find_cycles_log.json")
-        with open(log_file, "w") as f:
-            json.dump(self.log, f, indent=2, default=str)
 
     def _prepare_dirs(self):
         if not os.path.exists(self.output_path):
@@ -52,5 +40,4 @@ class CycleFinder:
             hc.run_harmonics(threshold=self.rips_threshold, save=True)
         self.cycle_log = hc.log
 
-        self._write_log()
         return self.cycle_log

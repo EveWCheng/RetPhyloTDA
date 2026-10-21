@@ -573,7 +573,9 @@ def _build_output(state: SimState, which_nodes: str = "no_hyb_nodes"):
     return {
         'phy': phy,
         'distance': distance,
+        #the final distance matrix
         'distance_include_tips': distance_include_tips,
+        #the changes
         'distance_include_tips_changes': distance_include_tips_changes,
         'distance_only_tips': distance_only_tips,
         'filtered_G': filtered_G,

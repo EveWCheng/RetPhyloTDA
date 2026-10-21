@@ -14,11 +14,9 @@ class FilterCycle:
         # "no_hyb_nodes": all_nodes, with internal hybrid-junction nodes collapsed
         self.which_nodes = which_nodes
         self.min_cycle_length = min_cycle_length
-        self.vis = vis
         # list of cycle-qualification strategies, ANDed together per cycle (getattr'd as qualifying_cycle_<mode>)
         self.cycle_qualify_mode = cycle_qualify_mode
         self.qualifying_cycle_keys = []
-        self.seen_markers = set()
         # cap on how many qualifying cycles get rendered in visualize; None means no cap
         self.max_plot_cycles = max_plot_cycles
 
@@ -67,27 +65,9 @@ class FilterCycle:
     def thresholds(self):
         return self.cycle_finder.thresholds
 
-    """add all nodes that are in an edge with weight more than ZERO_TOL"""
-    def _marker_nodes(self, cycle):
-        names = set()
-        for edge in cycle["edges"]:
-            if abs(edge["weight"]) <= self.WEIGHT_ZERO_TOL:
-                continue
-            for idx in edge["simplex"]:
-                name = self.index_to_name.get(idx)
-                if isinstance(name, str) and ("hyb" in name or "sp" in name):
-                    names.add(name)
-        return names
-
     def _select_threshold_cyclelength(self,cycle):
         edges = [(edge["simplex"], edge["weight"]) for edge in cycle["edges"] if abs(edge["weight"]) > self.WEIGHT_ZERO_TOL]
         return len(edges) > self.min_cycle_length
-
-    def _select_threshold_marker(self,cycle):
-        marker_nodes = self._marker_nodes(cycle)
-        new_markers = marker_nodes - self.seen_markers
-        self.seen_markers |= marker_nodes
-        return len(new_markers) != 0
 
     def _select_threshold_fixed(self,cycle):
         return any(cycle["birth"] <= t + 1e-5 for t in self.thresholds)

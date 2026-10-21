@@ -1,230 +1,133 @@
 import json
 
 import pytest
+import networkx as nx
+import numpy as np
 
-import main_result_analysis as mra
-
-FILTERED_EDGES_HEADER = "from,to,edge_type,length,time_length,inher_weight\n"
-NODES_HEADER = "id,label,type,is_leaf\n"
-
-
-@pytest.fixture
-def sim_dirs(tmp_path, monkeypatch):
-    phylo = tmp_path / "phylo_csv"
-    proc = tmp_path / "proc"
-    phylo.mkdir()
-    proc.mkdir()
-    monkeypatch.setattr(mra, "PHYLO_CSV_DIR", str(phylo))
-    monkeypatch.setattr(mra, "PROC_OUTPUTS_DIR", str(proc))
-    return phylo, proc
+from find_cycles import CycleFinder
+from main_result_analysis import MainResultAnalysis
 
 
-def _write_filtered_edges(phylo, sim_id, rows):
-    """rows: (from, to, edge_type, length, inher_weight-or-'')"""
-    body = "".join(f"{u},{v},{et},{length},{length},{inher}\n" for u, v, et, length, inher in rows)
-    (phylo / f"sim{sim_id}_filtered_edges.csv").write_text(FILTERED_EDGES_HEADER + body)
+NODES_CSV = """id,label,type,is_leaf
+-1,-1,internal,False
+-2,-2,internal,False
+-3,-3,internal,False
+sp4,sp4,leaf,True
+hyb5,hyb5,hyb_leaf,True
+"""
+
+EDGES_CSV = """from,to,edge_type,length,time_length,inher_weight
+-1,-2,tree,1.0,1.0,
+-1,-3,tree,2.0,2.0,0.7
+-2,-3,reticulation,0.5,0.0,0.3
+-2,sp4,tree,3.0,3.0,
+-3,hyb5,tree,1.5,1.5,
+"""
 
 
-def _write_nodes(phylo, sim_id, rows):
-    """rows: (id, label, type, is_leaf-bool)"""
-    body = "".join(f"{i},{label},{t},{is_leaf}\n" for i, label, t, is_leaf in rows)
-    (phylo / f"sim{sim_id}_nodes.csv").write_text(NODES_HEADER + body)
+def _circle_dist_matrix(n_points):
+    """Return the Euclidean distance matrix of n points evenly spaced on a unit circle."""
+    angles = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
+    points = np.column_stack([np.cos(angles), np.sin(angles)])
+    return np.linalg.norm(points[:, None, :] - points[None, :, :], axis=-1)
 
 
-def _write_log(proc, sim_id, dress_entries):
-    d = proc / f"sim{sim_id}"
-    d.mkdir()
-    (d / "find_cycles_log.json").write_text(json.dumps({"dress_distance_matrix": dress_entries}))
+# every edge in a cycle's weight history should be sampled at the same filtration times
+def test_weight_history_times_line_up_across_edges_in_each_cycle(tmp_path):
+    n_points = 8
+    G = nx.cycle_graph(n_points)
+    index_to_name = {i: f"sp{i}" for i in range(n_points)}
+    cf = CycleFinder(G, threshold_mode=[], output_dir=str(tmp_path), dist_matrix=_circle_dist_matrix(n_points), index_to_name=index_to_name, sim_label="sim0", harmonic_histories=True)
+    cf.find_cycles()
+
+    histories = MainResultAnalysis(str(tmp_path)).read_weight_histories(0)
+    assert len(histories) > 0
+
+    for cycle_index, edges in histories.items():
+        expected_times = None
+        for simplex, points in edges.items():
+            times = [t for t, _ in points]
+            if expected_times is None:
+                expected_times = times
+            assert times == expected_times, f"cycle {cycle_index} edge {simplex} has different history times"
 
 
-# ── read_leaf_labels ────────────────────────────────────────────────────────
+# the CSVs should come back as an undirected label-keyed graph with typed node and edge attributes
+def test_read_filtered_graph_builds_undirected_typed_graph(tmp_path):
+    sim_csv_dir = tmp_path / "phylo_csv" / "sim0"
+    sim_csv_dir.mkdir(parents=True)
+    (sim_csv_dir / "sim0_filtered_nodes.csv").write_text(NODES_CSV)
+    (sim_csv_dir / "sim0_filtered_edges.csv").write_text(EDGES_CSV)
 
-def test_read_leaf_labels_uses_is_leaf_not_type(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_nodes(phylo, 0, [
-        (1, "sp1", "leaf", True),
-        (2, "hyb2", "hyb_leaf", True),
-        (3, "hyb3", "hyb_leaf", False),   # former hybrid tip that later speciated
-        (4, "-4", "internal", False),
-    ])
-    assert mra.read_leaf_labels(0) == {"sp1", "hyb2"}
+    G, D = MainResultAnalysis(str(tmp_path)).read_filtered_graph(0)
 
+    assert isinstance(G, nx.Graph) and not G.is_directed()
+    assert set(G.nodes()) == {"-1", "-2", "-3", "sp4", "hyb5"}
+    assert G.nodes["sp4"] == {"label": "sp4", "type": "leaf", "is_leaf": True}
+    assert G.nodes["hyb5"] == {"label": "hyb5", "type": "hyb_leaf", "is_leaf": True}
+    assert G.nodes["-1"] == {"label": "-1", "type": "internal", "is_leaf": False}
 
-# ── read_network_graph ──────────────────────────────────────────────────────
+    assert G.number_of_edges() == 5
+    assert G.has_edge("-3", "-1")
+    assert G.edges["-2", "-3"] == {"edge_type": "reticulation", "length": 0.5, "time_length": 0.0, "inher_weight": 0.3}
+    assert G.edges["-1", "-3"] == {"edge_type": "tree", "length": 2.0, "time_length": 2.0, "inher_weight": 0.7}
+    assert G.edges["-2", "sp4"] == {"edge_type": "tree", "length": 3.0, "time_length": 3.0}
 
-def test_read_network_graph_builds_weighted_typed_leaf_tagged_graph(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [
-        ("r", "A", "tree", 1.0, ""),
-        ("m", "A", "reticulation", 2.0, "0.3"),
-    ])
-    _write_nodes(phylo, 0, [
-        (1, "r", "internal", False),
-        (2, "A", "leaf", True),
-        (3, "m", "internal", False),
-    ])
-    G = mra.read_network_graph(0)
-    assert not G.is_directed()
-    assert G.edges["r", "A"] == {"length": 1.0, "edge_type": "tree"}
-    assert G.edges["m", "A"]["edge_type"] == "reticulation"
-    assert G.nodes["A"]["is_leaf"] is True
-    assert G.nodes["r"]["is_leaf"] is False
-    assert G.nodes["m"]["is_leaf"] is False
+    assert D.is_directed()
+    assert D.has_edge("-1", "-3") and not D.has_edge("-3", "-1")
+    assert D.edges["-2", "-3"] == G.edges["-2", "-3"]
 
 
-def test_read_network_graph_keeps_shorter_of_parallel_edges(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [
-        ("x", "y", "tree", 5.0, ""),
-        ("x", "y", "reticulation", 2.0, "0.4"),  # shorter -> wins
-        ("x", "y", "tree", 9.0, ""),             # longer -> ignored
-    ])
-    _write_nodes(phylo, 0, [(1, "x", "leaf", True), (2, "y", "leaf", True)])
-    G = mra.read_network_graph(0)
-    assert G.edges["x", "y"]["length"] == 2.0
-    assert G.edges["x", "y"]["edge_type"] == "reticulation"
+# midpoints split into their parents; the leader is kept only when exactly two distinct nodes remain
+@pytest.mark.parametrize("u, v, expected", [
+    ("sp12", "hyb18", ("hyb18", "sp12")),
+    ("hyb18", "sp12", ("hyb18", "sp12")),
+    ("sp12_hyb18", "sp12", ("hyb18", "sp12")),
+    ("sp12", "sp12_hyb18", ("hyb18", "sp12")),
+    ("sp12_hyb18", "sp4", None),
+    ("sp12_hyb18", "sp4_sp5", None),
+])
+def test_traced_pair(u, v, expected):
+    assert MainResultAnalysis().traced_pair(u, v) == expected
 
 
-def test_read_network_graph_missing_file_returns_none(sim_dirs):
-    assert mra.read_network_graph(999) is None
+# history leaders use |weight|, keep ties, and skip time points where every weight is zero
+def test_history_leaders_uses_abs_weight_keeps_ties_and_skips_zero_points(tmp_path):
+    rip = {"harmonic_cycles": [{"cycle_index": 0, "weight_history": [
+        {"simplex": [0, 1], "history": [[1.0, 0.0], [2.0, -0.8], [3.0, 0.5]]},
+        {"simplex": [1, 2], "history": [[1.0, 0.0], [2.0, 0.8], [3.0, 0.2]]},
+        {"simplex": [0, 2], "history": [[1.0, 0.0], [2.0, 0.3], [3.0, -0.6]]},
+    ]}]}
+    sim_dir = tmp_path / "cycle_outputs" / "sim0"
+    sim_dir.mkdir(parents=True)
+    (sim_dir / "rip.json").write_text(json.dumps(rip))
+
+    leaders = MainResultAnalysis(str(tmp_path)).history_leaders(0)
+
+    assert leaders == {0: [
+        (2.0, 0.8, [(0, 1), (1, 2)]),
+        (3.0, 0.6, [(0, 2)]),
+    ]}
 
 
-# ── reticulate_edge_shortening ──────────────────────────────────────────────
+# weight leaders use |weight_before_projection|, keep ties, and skip cycles where every weight is zero
+def test_weight_leaders_uses_abs_weight_keeps_ties_and_skips_zero_cycles(tmp_path):
+    rip = {"harmonic_cycles": [
+        {"cycle_index": 0, "edges": [
+            {"simplex": [0, 1], "weight_before_projection": -0.8},
+            {"simplex": [1, 2], "weight_before_projection": 0.8},
+            {"simplex": [0, 2], "weight_before_projection": 0.3},
+        ]},
+        {"cycle_index": 1, "edges": [
+            {"simplex": [0, 1], "weight_before_projection": 0.0},
+            {"simplex": [1, 2], "weight_before_projection": 0.0},
+            {"simplex": [0, 2], "weight_before_projection": 0.0},
+        ]},
+    ]}
+    sim_dir = tmp_path / "cycle_outputs" / "sim0"
+    sim_dir.mkdir(parents=True)
+    (sim_dir / "rip.json").write_text(json.dumps(rip))
 
-def test_reticulate_edge_shortening_prepopulates_every_edge(sim_dirs):
-    phylo, proc = sim_dirs
-    _write_filtered_edges(phylo, 0, [
-        ("a", "H1", "reticulation", 1.0, "0.3"),
-        ("b", "H2", "reticulation", 1.0, "0.1"),
-    ])
-    _write_log(proc, 0, [])
-    assert mra.reticulate_edge_shortening(0) == {
-        frozenset({"a", "H1"}): (0, 0.0, None),
-        frozenset({"b", "H2"}): (0, 0.0, None),
-    }
+    leaders = MainResultAnalysis(str(tmp_path)).weight_leaders(0)
 
-
-def test_reticulate_edge_shortening_counts_pairs_and_takes_min_ratio(sim_dirs):
-    phylo, proc = sim_dirs
-    _write_filtered_edges(phylo, 0, [("a", "H1", "reticulation", 1.0, "0.3")])
-    _write_log(proc, 0, [
-        {"i": "L1", "j": "L2", "ratio": -0.2, "reticulation_edges_on_path": [{"edge": ["a", "H1"], "inher_weight": 0.3}]},
-        {"i": "L3", "j": "L4", "ratio": -0.5, "reticulation_edges_on_path": [{"edge": ["H1", "a"], "inher_weight": 0.3}]},  # reversed, same edge
-        {"i": "L5", "j": "L6", "ratio": -0.1, "reticulation_edges_on_path": []},
-        {"i": "L7", "j": "L8", "ratio": None, "reticulation_edges_on_path": [{"edge": ["a", "H1"], "inher_weight": 0.3}]},   # None skipped
-    ])
-    # max_shortening -0.5 came from the (L3, L4) pair
-    assert mra.reticulate_edge_shortening(0) == {frozenset({"a", "H1"}): (2, -0.5, ("L3", "L4"))}
-
-
-def test_reticulate_edge_shortening_missing_log_returns_none(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [("a", "H1", "reticulation", 1.0, "0.3")])
-    assert mra.reticulate_edge_shortening(0) is None
-
-
-# ── reticulate_edge_table_lines ─────────────────────────────────────────────
-
-def test_reticulate_edge_table_lines_no_log():
-    assert mra.reticulate_edge_table_lines([], None, set()) == ["reticulate-edge table: no find_cycles log"]
-
-
-def test_reticulate_edge_table_lines_sorted_by_shortening_and_flagged():
-    retic_edges = [("a", "H1", 0.3), ("b", "H2", None)]
-    shortening = {
-        frozenset({"a", "H1"}): (4, -0.8, ("L3", "L4")),
-        frozenset({"b", "H2"}): (0, 0.0, None),
-    }
-    on_path = {frozenset({"a", "H1"})}
-
-    body = mra.reticulate_edge_table_lines(retic_edges, shortening, on_path)[2:]
-
-    assert body[0].split() == ["a", "--", "H1", "4", "-0.800000", "L3", "--", "L4", "0.3000", "True"]
-    assert body[1].split() == ["b", "--", "H2", "0", "0.000000", "-", "None", "False"]
-
-
-# ── top_cycle_edge_paths ────────────────────────────────────────────────────
-
-def _cycle(*edges):
-    return {"edges": [{"nodes": [u, v], "weight": w} for u, v, w in edges]}
-
-
-def test_top_cycle_edge_paths_ranks_by_abs_weight_and_traces_path(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [
-        ("A", "m", "tree", 1.0, ""),
-        ("m", "B", "reticulation", 1.0, "0.3"),
-        ("A", "C", "tree", 4.0, ""),
-    ])
-    _write_nodes(phylo, 0, [
-        (1, "A", "leaf", True), (2, "B", "leaf", True),
-        (3, "C", "leaf", True), (4, "m", "internal", False),
-    ])
-    cycles = [_cycle(("A", "B", 1.0), ("A", "C", -0.5), ("A", "m", 0.1))]
-
-    out = mra.top_cycle_edge_paths(0, cycles, top_k=2, tip_to_tip_only=False)
-
-    assert [e["edge"] for e in out[0]] == [("A", "B"), ("A", "C")]  # by |weight|
-    assert out[0][0]["path"] == [
-        ("A", "m", "tree", 1.0),
-        ("m", "B", "reticulation", 1.0),
-    ]
-
-
-def test_top_cycle_edge_paths_includes_edges_tied_with_the_kth(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [
-        ("A", "B", "tree", 1.0, ""),
-        ("C", "D", "tree", 1.0, ""),
-        ("A", "C", "tree", 1.0, ""),
-    ])
-    _write_nodes(phylo, 0, [
-        (1, "A", "leaf", True), (2, "B", "leaf", True),
-        (3, "C", "leaf", True), (4, "D", "leaf", True),
-    ])
-    # two edges tied at |weight| 1.0, one at 0.3; top_k=1 -> both 1.0 edges
-    cycles = [_cycle(("A", "B", 1.0), ("C", "D", -1.0), ("A", "C", 0.3))]
-
-    out = mra.top_cycle_edge_paths(0, cycles, top_k=1, tip_to_tip_only=False)
-    assert {e["edge"] for e in out[0]} == {("A", "B"), ("C", "D")}
-
-
-def test_top_cycle_edge_paths_none_path_when_endpoint_off_graph(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [("A", "B", "tree", 1.0, "")])
-    _write_nodes(phylo, 0, [(1, "A", "leaf", True), (2, "B", "leaf", True)])
-    cycles = [_cycle(("A", "added_node_9", 1.0))]
-
-    out = mra.top_cycle_edge_paths(0, cycles, top_k=1, tip_to_tip_only=False)
-    assert out[0][0]["path"] is None
-
-
-def test_top_cycle_edge_paths_tip_to_tip_only_skips_internal_endpoint_edges(sim_dirs):
-    phylo, _ = sim_dirs
-    _write_filtered_edges(phylo, 0, [
-        ("A", "m", "tree", 1.0, ""),
-        ("m", "B", "tree", 1.0, ""),
-    ])
-    _write_nodes(phylo, 0, [
-        (1, "A", "leaf", True), (2, "B", "leaf", True), (3, "m", "internal", False),
-    ])
-    # highest |weight| edge touches internal node m; only A--B is leaf-to-leaf
-    cycles = [_cycle(("A", "m", 1.0), ("A", "B", 0.2))]
-
-    kept = mra.top_cycle_edge_paths(0, cycles, top_k=1, tip_to_tip_only=True)
-    assert kept[0][0]["edge"] == ("A", "B")
-
-    unfiltered = mra.top_cycle_edge_paths(0, cycles, top_k=1, tip_to_tip_only=False)
-    assert unfiltered[0][0]["edge"] == ("A", "m")
-
-
-# ── read_dress_change_ratios ────────────────────────────────────────────────
-
-def test_read_dress_change_ratios_reads_ratio_field_and_skips_none(sim_dirs):
-    _, proc = sim_dirs
-    _write_log(proc, 0, [{"ratio": -0.5}, {"ratio": None}, {"ratio": 0.0}])
-    assert mra.read_dress_change_ratios(0) == [-0.5, 0.0]
-
-
-def test_read_dress_change_ratios_missing_file_returns_none(sim_dirs):
-    assert mra.read_dress_change_ratios(999) is None
+    assert leaders == {0: (0.8, [(0, 1), (1, 2)])}

@@ -6,7 +6,7 @@ library(yaml)
 # ── Config ────────────────────────────────────────────────────────────────────
 # First CLI arg is the path to a config yaml (input_dir / output_dir). Any
 # further args are sim indices to restrict the run to; if none are given,
-# every sim with a simN_nodes.csv or simN_filtered_nodes.csv in input_dir is
+# every simN/ folder in input_dir (holding simN_nodes.csv and/or simN_filtered_nodes.csv) is
 # plotted. Relative paths in the config are resolved against the config file's
 # own directory, so the script can be run from any working directory.
 # Usage: Rscript plot_network.R <config.yaml> [sim_indices...]
@@ -29,13 +29,18 @@ REPORT_DIR <- if (!is.null(config$report_dir)) resolve_path(config$report_dir) e
 # which report to read: "weight" or "weight_before_projection" (main_result_analysis.py writes one per field)
 REPORT_WEIGHT_FIELD <- if (!is.null(config$report_weight_field)) config$report_weight_field else "weight"
 
+# path to one of a sim's CSVs: input_dir/simN/simN_<kind><what>.csv
+sim_csv_file <- function(sim_index, kind, what) {
+  file.path(IN_DIR, paste0("sim", sim_index), paste0("sim", sim_index, "_", kind, what, ".csv"))
+}
+
 sim_args <- args[-1]
 if (length(sim_args) > 0) {
   sim_indices <- as.integer(sim_args)
 } else {
-  # sim_main.py only exports the filtered CSVs; tree_main.py exports both.
-  node_files  <- list.files(IN_DIR, pattern = "^sim[0-9]+_(filtered_)?nodes\\.csv$")
-  sim_indices <- sort(unique(as.integer(gsub("^sim([0-9]+)_.*$", "\\1", node_files))))
+  # one simN/ folder per sim; sim_main.py only exports the filtered CSVs, tree_main.py exports both.
+  sim_dirs    <- list.files(IN_DIR, pattern = "^sim[0-9]+$")
+  sim_indices <- sort(as.integer(sub("^sim", "", sim_dirs)))
 }
 
 # ── Build an ape/evonet phylo object from one sim's nodes/edges CSVs ──────────
@@ -169,14 +174,14 @@ draw_traced_pairs <- function(traced, tip_names, shown_labels) {
 
 # ── Read one sim's CSVs, plot it, and write the PDF ───────────────────────────
 
-# kind = "" plots simN_nodes.csv/simN_edges.csv (raw phy.G, export_csv);
-# kind = "filtered_" plots simN_filtered_nodes.csv/simN_filtered_edges.csv
+# kind = "" plots simN/simN_nodes.csv and simN_edges.csv (raw phy.G, export_csv);
+# kind = "filtered_" plots simN/simN_filtered_nodes.csv and simN_filtered_edges.csv
 # (the "no_hyb_nodes"-collapsed graph gene-tree enumeration actually runs on,
 # export_filtered) -- same node IDs as the raw graph, just fewer nodes, so the
 # two PDFs stay directly comparable.
 plot_sim <- function(sim_index, kind = "") {
-  nodes_file <- file.path(IN_DIR, paste0("sim", sim_index, "_", kind, "nodes.csv"))
-  edges_file <- file.path(IN_DIR, paste0("sim", sim_index, "_", kind, "edges.csv"))
+  nodes_file <- sim_csv_file(sim_index, kind, "nodes")
+  edges_file <- sim_csv_file(sim_index, kind, "edges")
 
   nodes <- read.csv(nodes_file, stringsAsFactors = FALSE)
   edges <- read.csv(edges_file, stringsAsFactors = FALSE)
@@ -265,7 +270,7 @@ plot_sim <- function(sim_index, kind = "") {
 for (sim_index in sim_indices) {
   for (kind in c("", "filtered_")) {
     # Not every pipeline exports both kinds, so skip silently when absent
-    if (!file.exists(file.path(IN_DIR, paste0("sim", sim_index, "_", kind, "nodes.csv")))) next
+    if (!file.exists(sim_csv_file(sim_index, kind, "nodes"))) next
     result <- tryCatch({
       plot_sim(sim_index, kind)
       TRUE
