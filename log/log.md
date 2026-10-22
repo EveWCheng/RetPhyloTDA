@@ -686,3 +686,21 @@ Detection rate by the largest shrink among tip pairs whose shortest path uses th
 
 None of the 53 missed reticulations has a pair in its sim's top 10% of shrinks, so at 10% they
 mostly just didn't get a midpoint slot.
+
+***DATE 2026-10-22 — Rewrite of `main_result_analysis.py`: ancestor lineages instead of short paths
+
+- **Dropped the short-paths approach.** Detection now uses `ancestor_reticulations`: a reticulation
+  counts when it joins the two nodes' lineages (each node plus the ancestors it doesn't share with
+  the other), however far back. Shortcuts through a third lineage don't count.
+- **Midpoint edges are read more simply.** `traced_pair` splits a midpoint name like `sp12_hyb18`
+  back into its parent nodes, so the separate midpoint lookup isn't needed. A leader is kept only
+  if it traces to exactly two nodes.
+- **New `main_result_analysis.py`** (old one kept as `main_result_analysis_old.py`): finds the
+  leader edges in each cycle, traces them to node pairs, runs the ancestor check, and writes one
+  `detection_report.txt` with the detected reticulations and the pairs that found them, the missed
+  ones, tip/internal labels and an overall ratio.
+- **Matches the old results:** 21/53 with all time points on the run without midpoints.
+- **`plot_network.R` reads the new report:** detected reticulations are red and labelled with their
+  pairs; missed ones are grey dashed.
+- **Tests and pipeline:** rebuilt the tests for `shared` and `sim` (13 analysis tests pass), cleaned
+  up the sim pipeline, and the CSVs now go in one folder per sim (`phylo_csv/simN/`).

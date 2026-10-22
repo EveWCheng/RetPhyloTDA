@@ -24,10 +24,8 @@ IN_DIR   <- normalizePath(resolve_path(config$input_dir), mustWork = TRUE)
 PLOT_DIR <- resolve_path(config$output_dir)
 if (!dir.exists(PLOT_DIR)) dir.create(PLOT_DIR, recursive = TRUE)
 PLOT_DIR <- normalizePath(PLOT_DIR)
-# Optional: main_result_analysis.py's simN_analysis_<weight_field>.txt reports, used to colour detected reticulations
+# Optional: main_result_analysis.py's detection_report.txt, used to colour detected reticulations
 REPORT_DIR <- if (!is.null(config$report_dir)) resolve_path(config$report_dir) else NULL
-# which report to read: "weight" or "weight_before_projection" (main_result_analysis.py writes one per field)
-REPORT_WEIGHT_FIELD <- if (!is.null(config$report_weight_field)) config$report_weight_field else "weight"
 
 # path to one of a sim's CSVs: input_dir/simN/simN_<kind><what>.csv
 sim_csv_file <- function(sim_index, kind, what) {
@@ -94,66 +92,38 @@ build_phy <- function(nodes, edges) {
 
 # ── Reticulations detected per main_result_analysis.py's report ──────────────
 
-# Returns "from--to" keys of reticulations listed as on / not on a cycle-edge path, and those on no
-# tip-to-tip shortest path at all (off_tip, empty for older reports without that section), or NULL
-# when there is no report. Reads whatever top-k the report was written with.
+# Returns "from--to" keys of detected and missed reticulations for one sim from detection_report.txt,
+# the pairs that detected each, and the traced pairs; NULL when there is no report or no block for the sim.
 read_detection <- function(sim_index) {
   if (is.null(REPORT_DIR)) return(NULL)
-  report_file <- file.path(REPORT_DIR, paste0("sim", sim_index, "_analysis_", REPORT_WEIGHT_FIELD, ".txt"))
+  report_file <- file.path(REPORT_DIR, "detection_report.txt")
   if (!file.exists(report_file)) return(NULL)
   lines <- readLines(report_file)
-  # edge keys listed under the header matching `pattern`: the indented lines up to the next unindented one.
-  # NULL if the header is absent
-  section_keys <- function(pattern) {
-    start <- grep(pattern, lines)
-    if (length(start) != 1) return(NULL)
-    rest <- lines[-seq_len(start)]
-    n <- which(!grepl("^  ", rest))[1] - 1
-    if (is.na(n)) n <- length(rest)
-    hits <- regmatches(rest[seq_len(n)], regexec("^  (\\S+) -- (\\S+)  inher_weight=", rest[seq_len(n)]))
-    c(character(0), unlist(lapply(hits, function(m) if (length(m) == 3) paste(m[2], m[3], sep = "--"))))
-  }
-  detected <- section_keys("^reticulate edges on at least one top-[0-9]+ cycle-edge path")
-  missed   <- section_keys("^reticulate edges on no top-[0-9]+ cycle-edge path")
-  if (is.null(detected) || is.null(missed)) return(NULL)
-  off_tip <- section_keys("^reticulate edges on no tip-to-tip shortest path")
-  list(detected = detected, missed = missed, off_tip = if (is.null(off_tip)) character(0) else off_tip,
-       traced = traced_pairs(lines), detected_by = detected_by_labels(lines))
-}
-
-# "from--to" -> "(weight, time)" pairs of the leaders that detected it, one pair per line
-detected_by_labels <- function(lines) {
-  labels <- character(0)
-  matches <- regmatches(lines, regexec("^  (\\S+) -- (\\S+)  inher_weight=\\S+  detected_by=(.*)$", lines))
-  for (m in matches) {
-    if (length(m) != 4) next
-    pairs <- regmatches(m[4], gregexpr("\\([^)]*\\)", m[4]))[[1]]
-    labels[paste(m[2], m[3], sep = "--")] <- paste(pairs, collapse = "\n")
-  }
-  labels
-}
-
-# tip pairs whose shortest paths were traced: each top cycle edge, or its mid-tip parent pair(s)
-traced_pairs <- function(lines) {
-  start <- grep("^top-[0-9]+ cycle-edge shortest paths", lines)
-  if (length(start) != 1) return(list())
-  pairs <- list()
+  start <- grep(paste0("^sim", sim_index, ":"), lines)
+  if (length(start) != 1) return(NULL)
   rest <- lines[-seq_len(start)]
-  for (i in seq_along(rest)) {
-    if (!grepl("^  ", rest[i])) break
-    m <- regmatches(rest[i], regexec("^    (\\S+) -- (\\S+)  weight=", rest[i]))[[1]]
-    if (length(m) != 3) next
-    nxt <- if (i < length(rest)) rest[i + 1] else ""
-    if (grepl("^      \\(mid-tip: traced parent path ", nxt)) {
-      path_text <- sub("^.*traced parent path ", "", nxt)
-      parents <- regmatches(path_text, gregexpr("\\S+ -- \\S+", path_text))[[1]]
-      for (p in parents) pairs[[length(pairs) + 1]] <- strsplit(sub("[,)]$", "", p), " -- ")[[1]]
-    } else {
-      pairs[[length(pairs) + 1]] <- m[2:3]
+  n <- which(!grepl("^  ", rest))[1] - 1
+  if (is.na(n)) n <- length(rest)
+
+  detected <- character(0)
+  missed <- character(0)
+  detected_by <- character(0)
+  traced <- list()
+  for (line in rest[seq_len(n)]) {
+    m <- regmatches(line, regexec("^  detected (\\S+)\\([a-z]+\\) -- (\\S+)\\([a-z]+\\)  by (.*)$", line))[[1]]
+    if (length(m) == 4) {
+      key <- paste(m[2], m[3], sep = "--")
+      detected <- c(detected, key)
+      pairs <- strsplit(m[4], ", ")[[1]]
+      detected_by[key] <- paste(pairs, collapse = "\n")
+      for (p in pairs) traced[[length(traced) + 1]] <- sub("\\([a-z]+\\)$", "", strsplit(p, "--")[[1]])
+      next
     }
+    m <- regmatches(line, regexec("^  missed   (\\S+) -- (\\S+)$", line))[[1]]
+    if (length(m) == 3) missed <- c(missed, paste(m[2], m[3], sep = "--"))
   }
-  keys <- vapply(pairs, function(p) paste(sort(p), collapse = "--"), "")
-  pairs[!duplicated(keys)]
+  keys <- vapply(traced, function(p) paste(sort(p), collapse = "--"), "")
+  list(detected = detected, missed = missed, traced = traced[!duplicated(keys)], detected_by = detected_by)
 }
 
 # purple bracket right of the tip labels joining each traced tip pair, one column per pair
@@ -208,28 +178,24 @@ plot_sim <- function(sim_index, kind = "") {
 
   title_label <- paste0("BDH Network - ", if (kind == "") "raw" else "filtered", " - sim", sim_index)
 
-  # reticulations: red = on a cycle-edge path in the analysis report, grey dashed = missed,
-  # thick orange dashed = missed and on no tip-to-tip shortest path at all (so undetectable),
+  # reticulations: red = detected in the report, grey dashed = missed,
   # blue = no report (same order as build_phy's phy$reticulation rows)
   ret_edges <- edges[edges$edge_type == "reticulation", ]
   detection <- if (kind == "filtered_") read_detection(sim_index) else NULL
-  ret_col <- "blue"; ret_lty <- 1; ret_lwd <- 1
+  ret_col <- "blue"; ret_lty <- 1
   if (!is.null(detection) && nrow(ret_edges) > 0) {
     fwd <- paste(ret_edges$from, ret_edges$to, sep = "--")
     rev <- paste(ret_edges$to, ret_edges$from, sep = "--")
     hit  <- fwd %in% detection$detected | rev %in% detection$detected
     miss <- fwd %in% detection$missed   | rev %in% detection$missed
-    off  <- fwd %in% detection$off_tip  | rev %in% detection$off_tip
-    ret_col <- ifelse(hit, "red", ifelse(off, "orange", ifelse(miss, "grey50", "blue")))
+    ret_col <- ifelse(hit, "red", ifelse(miss, "grey50", "blue"))
     ret_lty <- ifelse(hit, 1, 2)
-    ret_lwd <- ifelse(!hit & off, 2.5, 1)
-    title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected, ",
-                          sum(off), " on no tip path\n(", REPORT_WEIGHT_FIELD, ")")
+    title_label <- paste0(title_label, " - ", sum(hit), "/", nrow(ret_edges), " retic detected")
   }
   traced <- if (!is.null(detection)) Filter(function(p) all(p %in% tip_names), detection$traced) else list()
   depth  <- max(ape::node.depth.edgelength(phy))
   x_lim  <- if (length(traced) > 0) c(0, depth * (1.5 + 0.06 * length(traced))) else NULL
-  plot(phy, main = title_label, col = ret_col, lty = ret_lty, lwd = ret_lwd, alpha = 0.9, tip.color = tip_color,
+  plot(phy, main = title_label, col = ret_col, lty = ret_lty, alpha = 0.9, tip.color = tip_color,
        x.lim = x_lim)
   if (length(traced) > 0) draw_traced_pairs(traced, tip_names, phy$tip.label)
   if (!all(tip_is_live)) {
@@ -248,7 +214,7 @@ plot_sim <- function(sim_index, kind = "") {
     mid_y <- (lp$yy[phy$reticulation[, 1]] + lp$yy[phy$reticulation[, 2]]) / 2
     text(mid_x, mid_y, formatC(phy$reticulation.length, format = "f", digits = 2),
          cex = 0.5, col = ifelse(is.character(ret_col) & ret_col == "red", "red", "grey30"))
-    # (leader weight, time it first led) for each leader that detected the reticulation, under its length
+    # the pairs that detected the reticulation, under its length
     if (!is.null(detection) && length(detection$detected_by) > 0) {
       fwd <- paste(ret_edges$from, ret_edges$to, sep = "--")
       rev <- paste(ret_edges$to, ret_edges$from, sep = "--")
@@ -258,8 +224,8 @@ plot_sim <- function(sim_index, kind = "") {
     }
   }
   if (!is.null(detection) && nrow(ret_edges) > 0) {
-    legend("topleft", legend = c("retic detected", "retic missed", "retic on no tip-to-tip shortest path"),
-           col = c("red", "grey50", "orange"), lty = c(1, 2, 2), lwd = c(1, 1, 2.5), bty = "n", cex = 0.7)
+    legend("topleft", legend = c("retic detected", "retic missed"),
+           col = c("red", "grey50"), lty = c(1, 2), bty = "n", cex = 0.7)
   }
 
   cat("Plot written to", out_file, "\n")

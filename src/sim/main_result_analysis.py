@@ -10,9 +10,10 @@ from sim_main import CONFIG_PATH, SIM_OUTPUTS_DIR, load_config
 
 class MainResultAnalysis:
 
-    def __init__(self, sim_outputs_dir=SIM_OUTPUTS_DIR, config_path=CONFIG_PATH):
+    def __init__(self, sim_outputs_dir=SIM_OUTPUTS_DIR, config_path=CONFIG_PATH, sel_op="all"):
         self.sim_outputs_dir = sim_outputs_dir
         self.config_path = config_path
+        self.sel_op = sel_op
         self.phylo_csv_dir = os.path.join(sim_outputs_dir, "phylo_csv")
         self.proc_outputs_dir = os.path.join(sim_outputs_dir, "proc_phylo_outputs")
         self.cycle_outputs_dir = os.path.join(sim_outputs_dir, "cycle_outputs")
@@ -85,12 +86,10 @@ class MainResultAnalysis:
 
     def read_filtered_graph(self, sim_id):
         sim_csv_dir = os.path.join(self.phylo_csv_dir, f"sim{sim_id}")
-        G = nx.Graph()
         D = nx.DiGraph()
         with open(os.path.join(sim_csv_dir, f"sim{sim_id}_filtered_nodes.csv"), newline="") as f:
             for row in csv.DictReader(f):
                 attrs = {"label": row["label"], "type": row["type"], "is_leaf": row["is_leaf"] == "True"}
-                G.add_node(row["id"], **attrs)
                 D.add_node(row["id"], **attrs)
         with open(os.path.join(sim_csv_dir, f"sim{sim_id}_filtered_edges.csv"), newline="") as f:
             for row in csv.DictReader(f):
@@ -101,9 +100,8 @@ class MainResultAnalysis:
                 }
                 if row["inher_weight"] != "":
                     attrs["inher_weight"] = float(row["inher_weight"])
-                G.add_edge(row["from"], row["to"], **attrs)
                 D.add_edge(row["from"], row["to"], **attrs)
-        return G, D
+        return D
 
     def read_all_filtered_graphs(self):
         graphs = {}
@@ -112,6 +110,23 @@ class MainResultAnalysis:
         return graphs
 
     def history_leaders(self, sim_id, tol=1e-9):
+        history_leaders = self._history_leaders_(sim_id, tol)
+        leaders = {}
+        for cycle in history_leaders.keys():
+            cycle_leaders = history_leaders[cycle]
+            if len(cycle_leaders) == 0:
+                continue
+            if self.sel_op == "only_at_birth":
+                t, highest, tied = cycle_leaders[0]
+                leaders[cycle] = [(highest, tied)]
+            elif self.sel_op == "all":
+                without_t = []
+                for t, highest, tied in cycle_leaders:
+                    without_t.append((highest, tied))
+                leaders[cycle] = without_t
+        return leaders
+
+    def _history_leaders_(self, sim_id, tol=1e-9):
         """Return {cycle_index: [(t, max |weight|, [edges tied for it]), ...]} over each cycle's history."""
         leaders = {}
         for cycle_index, edges in self.read_weight_histories(sim_id).items():
@@ -137,7 +152,6 @@ class MainResultAnalysis:
         return leaders
 
     def weight_leaders(self, sim_id, tol=1e-9):
-        """Return {cycle_index: (max |weight_before_projection|, [edges tied for it])} for each cycle."""
         leaders = {}
         for cycle_index, edges in self.read_weights_before_projection(sim_id).items():
             highest = 0.0
@@ -150,7 +164,7 @@ class MainResultAnalysis:
             for edge, weight in edges.items():
                 if abs(weight) >= highest - tol:
                     tied.append(edge)
-            leaders[cycle_index] = (highest, tied)
+            leaders[cycle_index] = [(highest, tied)]
         return leaders
 
     def traced_pair(self, u, v):
@@ -166,28 +180,7 @@ class MainResultAnalysis:
             return None
         return tuple(sorted(nodes))
 
-    def short_paths(self, G, u, v, tol=1e-9):
-        tree = G.copy()
-        for a, b, edge_type in G.edges(data="edge_type"):
-            if edge_type == "reticulation":
-                tree.remove_edge(a, b)
-        tree_length = nx.shortest_path_length(tree, u, v, weight="length")
-
-        paths = []
-        for path in nx.shortest_simple_paths(G, u, v, weight="length"):
-            length = nx.path_weight(G, path, weight="length")
-            if length >= tree_length - tol:
-                break
-            reticulations = []
-            for a, b in nx.utils.pairwise(path):
-                if G.edges[a, b]["edge_type"] == "reticulation":
-                    reticulations.append((a, b))
-            paths.append({"path": path, "length": length, "tree_length": tree_length, "reticulations": reticulations})
-        return paths
-
-    #need check
     def ancestor_reticulations(self, D, u, v):
-        """Return reticulation edges joining u's lineage to v's lineage below their most recent common ancestor."""
         tree = D.copy()
         for a, b, edge_type in D.edges(data="edge_type"):
             if edge_type == "reticulation":
@@ -213,14 +206,70 @@ class MainResultAnalysis:
                 reticulations.append((a, b))
         return reticulations
 
+    def node_kind(self, D, node):
+        """Return "tip" if the node is a leaf in D, otherwise "internal"."""
+        if D.nodes[node]["is_leaf"]:
+            return "tip"
+        return "internal"
 
+    def from_pairs_to_ret_each_sim(self, sim_id):
+        D = self.read_filtered_graph(sim_id)
+        index_to_name = self.read_index_to_name(sim_id)
+        leaders = self.history_leaders(sim_id)
 
+        leader_edges = []
+        for cycle_leaders in leaders.values():
+            for highest, tied in cycle_leaders:
+                leader_edges.extend(tied)
 
+        detected = {}
+        for i, j in leader_edges:
+            pair = self.traced_pair(index_to_name[i], index_to_name[j])
+            if pair is None:
+                continue
+            for edge in self.ancestor_reticulations(D, pair[0], pair[1]):
+                detected.setdefault(edge, []).append(pair)
+
+        missed = []
+        for a, b, edge_type in D.edges(data="edge_type"):
+            if edge_type == "reticulation" and (a, b) not in detected:
+                missed.append((a, b))
+        return detected, missed
 
 
 def main():
-    """Analyse simulation outputs and write reports."""
     analysis = MainResultAnalysis()
+    lines = [f"sel_op: {analysis.sel_op}"]
+    total_detected = 0
+    total_missed = 0
+    for sim_id in analysis.sim_ids():
+        detected, missed = analysis.from_pairs_to_ret_each_sim(sim_id)
+        D = analysis.read_filtered_graph(sim_id)
+        total_detected += len(detected)
+        total_missed += len(missed)
+        lines.append(f"sim{sim_id}: {len(detected)} detected, {len(missed)} missed")
+        for (a, b), pairs in detected.items():
+            pair_texts = []
+            for u, v in pairs:
+                text = f"{u}({analysis.node_kind(D, u)})--{v}({analysis.node_kind(D, v)})"
+                if text not in pair_texts:
+                    pair_texts.append(text)
+            lines.append(f"  detected {a}({analysis.node_kind(D, a)}) -- {b}({analysis.node_kind(D, b)})  by {', '.join(pair_texts)}")
+        for a, b in missed:
+            lines.append(f"  missed   {a} -- {b}")
+
+    total = total_detected + total_missed
+    lines.append("")
+    if total == 0:
+        lines.append("no reticulations in any simulation")
+    else:
+        lines.append(f"overall: {total_detected} of {total} reticulations detected ({total_detected / total:.1%})")
+
+    os.makedirs(analysis.analysis_reports_dir, exist_ok=True)
+    path = os.path.join(analysis.analysis_reports_dir, "detection_report.txt")
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print("\n".join(lines))
 
 
 if __name__ == "__main__":
